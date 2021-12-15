@@ -92,10 +92,7 @@ impl<'a> Builder<'a> {
 
     // Move out of Builder into Core.
     pub fn to_core(self) -> KeyTree<'a> {
-        KeyTree {
-            s:      self.s,
-            tokens: self.tokens,
-        }
+        KeyTree(self.tokens)
     }
 
     // Each token at indent n, except the root token, has parents at each
