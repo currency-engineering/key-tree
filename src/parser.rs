@@ -3,7 +3,7 @@
 use crate::{KeyTree, Token};
 use crate::builder::{Parents, SameNameSibs};
 
-use crate::error::{ err, Error };
+use crate::error::*;
 use crate::Result;
 
 const INDENT_STEP: usize = 4;
@@ -31,7 +31,7 @@ impl BadIndent {
         token: &Token,
         line: usize) -> Error
     {
-        err(file!(), line!(), &format!("Bad indent of {} at line {}.", self.0, line))
+        err!(&format!("Bad indent of {} at line {}.", self.0, line))
     }
 }
 
@@ -105,12 +105,7 @@ impl<'a> Builder<'a> {
         match (token, self.is_empty()) {
 
             (token @ Token::KeyValue {..}, true) => {
-                Err(
-                    err(
-                        file!(), line!(),
-                        &format!("First token {} must be key.", &token),
-                    )
-                )
+                Err(err!(&format!("First token {} must be key.", &token)))
             },
 
             (token @ Token::Key {..}, true) => {
@@ -152,25 +147,14 @@ impl<'a> Builder<'a> {
 
                 // Get parent index.
                 if indent == 0 {
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Non-root token {} cannot have zero indent at line {}.",
-                                &token,
-                                token.line(),
-                            ),
-                        )
-                    )
+                    return Err(err!(
+                        &format!("Non-root token {} cannot have zero indent at line {}.", &token, token.line())
+                    ))
                 };
 
                 let parent_ix = match self.parents.parent(indent - 1) {
                     Some(ix) => ix,
-                    None => { return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Unexpected indent at line {}.", token.line()),
-                        )
-                    )},
+                    None => return Err(err!(&format!("Unexpected indent at line {}.", token.line()))),
                 };
 
                 // Get the index of the new token, when the token is actually
@@ -216,7 +200,7 @@ impl<'a> Builder<'a> {
     // main example at the start of the documentation or in README.md
     pub fn parse(s: &str) -> Result<KeyTree> {
 
-        if s == "" { return Err(err(file!(), line!(), "Empty string.")) };
+        if s == "" { return Err(err!("Empty string.")) };
 
         let mut parse_state: PS = PS::FC;
 
@@ -382,19 +366,13 @@ impl<'a> Builder<'a> {
                 (PS::IK, Char::Whitespace) => {
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("No colon after key {} at line {}.", &token_str, line + 1),
-                        )
-                    );
+                        err!(&format!("No colon after key {} at line {}.", &token_str, line + 1))
+                    )
                 },
                 (PS::COK, Char::Whitespace) => {
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Incomplete comment of key {} at {}.", &token_str, line + 1),
-                        )
+                        err!(&format!("Incomplete comment of key {} at {}.", &token_str, line + 1))
                     )
                 },
 
@@ -404,11 +382,8 @@ impl<'a> Builder<'a> {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("No space after key {} at line {}.", &token_str, line),
-                        )
-                    );
+                        err!(&format!("No space after key {} at line {}.", &token_str, line))
+                    )
                 },
 
                 // Newline errors
@@ -416,21 +391,13 @@ impl<'a> Builder<'a> {
                 (PS::COK, Char::Newline) => {
                     line += 1;
                     return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Incomplete line {} at {}.", &String::from("/"), line),
-                        )
+                        err!(&format!("Incomplete line {} at {}.", &String::from("/"), line))
                     )
                 },
                 (PS::IK, Char::Newline) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Incomplete line {} at {}.", &token_str, line),
-                        )
-                    );
+                    return Err(err!(&format!("Incomplete line {} at {}.", &token_str, line)))
                 },
 
                 // Colon, errors
@@ -438,32 +405,17 @@ impl<'a> Builder<'a> {
                 (PS::FC, Char::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Colon before key {} at {}.", &token_str, line),
-                        )
-                    )
+                    return Err(err!(&format!("Colon before key {} at {}.", &token_str, line)))
                 },
                 (PS::BK, Char::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("Colon before key {} at {}.", &token_str, line),
-                        )
-                    )
+                    return Err(err!(&format!("Colon before key {} at {}.", &token_str, line)))
                 },
                 (PS::RAK, Char::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("No space after key {} at {}.", &token_str, line),
-                        )
-                    )
+                    return Err(err!(&format!("No space after key {} at {}.", &token_str, line)))
                 },
 
                 // Forward slash errors
@@ -471,12 +423,7 @@ impl<'a> Builder<'a> {
                 (PS::RAK, Char::ForwardSlash) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        err(
-                            file!(), line!(),
-                            &format!("No space after key {} at line {}.", &token_str, line),
-                        )
-                    )
+                    return Err(err!(&format!("No space after key {} at line {}.", &token_str, line)))
                 },
             };  // end match
             
@@ -489,22 +436,12 @@ impl<'a> Builder<'a> {
             PS::BK => {},
             PS::COK => {
                 let token_str = &s[start_key..];
-                return Err(
-                    err(
-                        file!(), line!(),
-                        &format!("Incomplete comment or key {} at line {}.", &token_str, line),
-                    )
-                )
+                return Err(err!(&format!("Incomplete comment or key {} at line {}.", &token_str, line)))
             },
             PS::IK => { 
                 line += 1;
                 let token_str = &s[start_key..];
-                return Err(
-                    err(
-                        file!(), line!(),
-                        &format!("Incomplete line {} at {}.", &token_str, line)
-                    )
-                )
+                return Err(err!(&format!("Incomplete line {} at {}.", &token_str, line)))
             },
             PS::RAK => {
                 line += 1;
@@ -554,10 +491,9 @@ impl<'a> Builder<'a> {
             PS::CM => {},
         };
 
-        if core_builder.is_empty() {
-            Err(err(file!(), line!(), "No tokens"))
-        } else {
-            Ok(core_builder.to_core())
+        match core_builder.is_empty() {
+            true => Err(err!("No tokens")),
+            false => Ok(core_builder.to_core()),
         }
     }
 }
