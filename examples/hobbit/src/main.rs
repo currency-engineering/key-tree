@@ -28,10 +28,10 @@ impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
     fn try_into(self) -> Result<Hobbit, Error> {
         Ok(
             Hobbit {
-                name:       self.value("hobbit::name")?,
-                age:        self.value("hobbit::age")?,
+                name:       self.from_str("hobbit::name")?,
+                age:        self.from_str("hobbit::age")?,
                 friends:    self.opt_vec_at("hobbit::friends::hobbit")?,
-                nick:       self.opt_value("hobbit::nick")?,
+                nick:       self.opt_from_str("hobbit::nick")?,
             }
         )
     }
@@ -41,6 +41,6 @@ fn main() {
     let kt = KeyTree::parse(HOBBITS).unwrap();
     let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
 
-    &dbg!(&hobbit);
+    dbg!(&hobbit);
 }
 

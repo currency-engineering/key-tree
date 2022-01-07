@@ -1,3 +1,5 @@
+//! Module to serialize a Rust data-structure into a nicely-formatted keytree string.
+
 use std::fmt;
 use std::fmt::Display;
 
@@ -99,13 +101,13 @@ impl KeyTreeString {
         match value {
             None => return,
             Some(v) => {
-                self.push_value(indent, key, v.to_string().as_str())
+                self.push_keyvalue(indent, key, v.to_string().as_str())
             },
         }
     }
 
     /// Push a key-value token onto the String. The indent value is relative to the root indent.
-    pub fn push_value<T: Display>(&mut self, indent: usize, key: &str, value: T) {
+    pub fn push_keyvalue<T: Display>(&mut self, indent: usize, key: &str, value: T) {
         let kv = Token::KeyValToken(
             KeyValToken {
                 indent: indent,
@@ -164,7 +166,7 @@ impl KeyTreeString {
                     self.push_key(k.indent + indent, &k.key);
                 },
                 Token::KeyValToken(kv) => {
-                    self.push_value(kv.indent + indent, &kv.key, &kv.val);
+                    self.push_keyvalue(kv.indent + indent, &kv.key, &kv.val);
                 },
                 Token::Comment(c) => {
                     self.push_comment(c.indent + indent, &c.comment);

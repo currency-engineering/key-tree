@@ -29,143 +29,84 @@
 //!             age:  38
 //!             nick: Sam
 //! ```
-//! Now we need to tell the struct how to select the the relevant part of this string, so for
-//! instance we need to tell the struct that we get the name by following the path 
-//! `hobbit::name`. This selection mechanism has to be somewhat more sophisticated because we want
-//! to be able to select a `Vec` by, for instance, using the `hobbit::friends::hobbit` path to
-//! select both of Frodo's friends. Once we have selected the set of lines in the string we need a
-//! way to tell the data-structure how to convert that line into the correct type for the
-//! data-structure. To do this we need to implement the `FromStr` trait (if the field type does not
-//! already implement one) for the, so that the data-structure can take the selected key-values, and
-//! convert them to the field type. If the field type is a type `T` that we have built, we can
-//! implement `TryInto<T>` on it. The ! `TryInto` implementation for `Hobbit` looks like
+//!
+//! Then we need to implement `TryInto<Hobbit>` to deserialize the string into a Rust
+//! data-structure,
+//!
+//! ```
+//! impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
+//!     type Error = Error;
+//! 
+//!     fn try_into(self) -> Result<Hobbit, Error> {
+//!         Ok(
+//!             Hobbit {
+//!
+//!                 // use the `from_str` implementation of `String` to get a `name`.
+//!                 name: self.from_str("hobbit::name")?,
+//!
+//!                 // use the `from_str` implementation `u32` to get an `age`.
+//!                 age: self.from_str("hobbit::age")?,
+//!
+//!                 // use the `TryInto<Hobbit> implementation to get a `Vec<Hobbit>`.
+//!                 friends: self.opt_vec_at("hobbit::friends::hobbit")?,
+//!
+//!                 // uses the `from_str` implementation for `String` to get an `Option<String>`.
+//!                 // If the keypath does not exist it returns `None`.
+//!                 nick: self.opt_from_str("hobbit::nick")?,
+//!             }
+//!         )
+//!     }
+//! }
+//! ```
+//!
+//! Functions that make a selection from the keytree string and deserialize it are
+//! ```
+//! self.at("abc::def::ghi")?
+//! ```
+//! ```
+//! self.opt_at("abc::def::ghi")?
+//! ```
+//! ```
+//! self.vec_at("abc::def::ghi")?
+//! ```
+//! ```
+//! self.opt_vec_at("abc::def::ghi")?
+//! ```
+//! ```
+//! self.from_str("abc::def::ghi")?
+//! ```
+//! ```
+//! self.opt_from_str("abc::def::ghi")?
+//! ```
+//! ```
+//! self.opt_vec_from_str("abc::def::ghi")?
+//! ```
+//!
+//! The deserializing function should look something like
+//!
 //! ``` 
-//! impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
-//!     type Error = Error;
-//! 
-//!     fn try_into(self) -> Result<Hobbit, Error> {
-//!         Ok(
-//!             Hobbit {
-//!                 name:       self.value("hobbit::name")?,
-//!                 age:        self.value("hobbit::age")?,
-//!                 friends:    self.opt_vec_at("hobbit::friends::hobbit")?,
-//!                 nick:       self.opt_value("hobbit::nick")?,
-//!             }
-//!         )
-//!     }
-//! }
-//! ```
-//! The important functions are
-//! ```
-//! self.value("a::b::c")?
-//! ```
-//! and  which converts from a string and
-//! ```
-//! self.at("a::b::c")?
-//! ```
-//! which converts to a type `T` implementing the `TryInto<T>` trait. Then there are variations of
-//! `value()` and `at()` for handling conversions into `Options`:
+//!     // Creates an 'abstract syntax tree' which is just a set of references into the keytree string s.
+//!     let kt = KeyTree::parse(s).unwrap();
 //!
-//! ```
-//! self.opt_value("a::b::c")?
-//! ```
-//! and
-//! ```
-//! self.opt_at("a::b::c")
-//! ```
-//! In these cases, if the selected key-value does not exist, we get a `None` value. To convert into
-//! a `Vec` we can use
-//! ```
-//! self.vec_value("a::b::c")?
-//! ```
-//! and
-//! ```
-//! self.vec_at("a::b::c")?
-//! ```
-//! which require at least one key-value and 
-//! ```
-//! self.opt_vec_at("a::b::c")?
-//! ```
-//! and
-//! ```
-//! self.opt_vec_value("a::b::c")?
-//! ```
-//! which will return an empty `Vec` if the key-value does not exist.
-//! 
-//! ## Example
-//! 
-//! `Into` from `KeyTree` into Rust types is automatically implemented for `Vec<T>`, `Option<T>`
-//! and basic Rust types. `KeyTree` text can be automatically converted to these data types, making
-//! use of type inference. The `at()` function returns an iterator over `KeyTree` types that can be
-//! used to implement `Into` for your own types. The following example should cover 90 percent of
-//! use cases,
-//! 
-//! ```rust
-//! use std::convert::TryInto;
-//! use keytree::{KeyTree, KeyTreeRef};
-//! use keytree::Error;
-//! 
-//! static HOBBITS: &'static str = r#"
-//! hobbit:
-//!     name:         Frodo Baggins
-//!     age:          60
-//!     friends:
-//!         hobbit:
-//!             name: Bilbo Baggins
-//!             age:  111
-//!         hobbit:
-//!             name: Samwise Gamgee
-//!             age:  38
-//!             nick: Sam
-//! "#;
-//! 
-//! #[derive(Debug)]
-//! struct Hobbit {
-//!     name: String,
-//!     age: u32,
-//!     friends: Vec<Hobbit>,
-//!     nick: Option<String>,
-//! }
-//! 
-//! impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
-//!     type Error = Error;
-//! 
-//!     fn try_into(self) -> Result<Hobbit, Error> {
-//!         Ok(
-//!             Hobbit {
-//!                 name:       self.value("hobbit::name")?,
-//!                 age:        self.value("hobbit::age")?,
-//!                 friends:    self.vec_at("hobbit::friends::hobbit")?,
-//!                 nick:       self.opt_value("hobbit::nick")?,
-//!             }
-//!         )
-//!     }
-//! }
-//! 
-//! fn main() {
-//!     let kt = KeyTree::parse(HOBBITS).unwrap();
+//!     // kt.to_ref() creates a reference to kt.
+//!     // try_into() does all the deserialization work.
 //!     let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
-//! 
 //!     &dbg!(&hobbit);
-//! }
-//! ```
 //!
-//! ## Data Specification 
+//! ```
+//! ## KeyTree Syntax Specification 
 //! 
-//! - Indentation has meaning and is 4 spaces, relative to the top key. Since indenting is
-//!    relative to the top key, then you can neatly align strings embedded in code.
+//! - Indentation has meaning and is 4 spaces, relative to the top key. Since indenting is relative
+//! to the top key, then you can neatly align strings embedded in code.
 //! 
-//! - Each line can be empty, have whitespace only, be a comment, be a key, or be a key/value
-//!    pair.
+//! - Each line can be empty, have whitespace only, be a comment, be a key, or be a key/value pair.
 //! 
-//! - There are keys and values. Key/Value pairs look like
+//! - There are keys and values. Key/value pairs look like
 //! 
 //! ```text
 //! name: Frodo
 //! ```
-//! are used for `struct` fields and `enum` variants.
-//! 
-//! Keys refer to child keys or child key/value pairs indented on lines under it, for example
+//! Keys have children indented 4 spaces below them. The children can be either keys or key/value pairs.
 //! 
 //! ```text
 //! hobbit:
@@ -181,14 +122,14 @@
 //!     name: Frodo
 //!     name: Bilbo
 //! ```
-//! is a collection of hobbits.
+//! is a collection of hobbits. Sibling keys with the same name must be contiguous. 
 //! 
 //! - Keys must not include but must be followed by a colon `:`.
 //! 
 //! - Values are all characters between the combination of ':' and whitespace and the end of the
-//!    line. The value is trimmed of whitespace at both ends.
+//! line. The value is trimmed of whitespace at both ends.
 //! 
-//! - A comment line starts witha any amount of whitespace followed by `//`. 
+//! - Comments can only be on their own line. A comment line starts with any amount of whitespace followed by `//`.
 //! 
 //! ```text
 //! // comment
@@ -196,16 +137,6 @@
 //!     // another comment
 //!     name: Frodo
 //! ```
-//! ## Efficiency
-//!
-//! There are no copies of the original string. The parsing process builds of immutable tree-structure which
-//! points into the original string. Selection operations involve the manipulation of a single `usize`
-//! cursor, so once A `KeyTree` is built, many lightweight `KeyTree` refs can be efficiently built
-//! and used for searching. So the only string copy that occurs is the final conversion into the
-//! receiving data-structure. Following a path into a keytree involves a scan of differently named
-//! siblings held in a Vec. The assumption is that the number of different sibling names is
-//! generally small because the number of fields in data-structures is also generally small. From
-//! the point of view of compile time, there are no dependencies and no macros.
 
 #![forbid(unsafe_code)]
 
@@ -225,19 +156,30 @@ pub mod serialize;
 
 type Result<T> = std::result::Result<T, Error>;
 
-// A `KeyPath` is used to follow keys into a keytree. Think of `KeyPath` as an iterator with a
-// double window looking into a (parent segment, child segment).
+// Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
+// `KeyPath` as an iterator with a double window looking into a (parent segment, child segment).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub (crate) struct KeyPath {
     segments: Vec<String>,
+    
+    // Must be within the range 0 .. segments.len() - 2.
+    // only after
+    // [abc::def::ghi]
+    //   ^    ^
+    //   0    1
     counter: usize,
 }
 
 impl KeyPath {
 
     pub (crate) fn is_last(&self) -> bool {
+        // This function is checked before the counter advances.
         self.counter == self.segments.len() - 2
     }
+
+    // #[test]
+    // pub test_is_last() {
+    // }
 
     pub (crate) fn advance(&mut self) {
         self.counter += 1;
@@ -247,14 +189,23 @@ impl KeyPath {
         };
     }
 
+    // [abc::def::ghi]
+    //        ^
+    //        1
+    //   Parent is "def"
     pub (crate) fn parent_segment(&self) -> String {
         self.segments[self.counter].clone()
     }
 
+    // [abc::def::ghi]
+    //        ^
+    //        1
+    //   Child is "ghi"
     pub (crate) fn child_segment(&self) -> String {
         self.segments[self.counter + 1].clone()
     }
 
+    // FromStr trait is not implemented because this never returns an error.
     pub (crate) fn from_str(s: &str) -> Self {
         let v = s.split(':')
             .filter(|s| !s.is_empty())
@@ -267,13 +218,23 @@ impl KeyPath {
     }
 }
 
+trait StringConcat {
+    fn string_concat<'a>(&self, f: fn (String) -> String) -> String;
+}
+
+impl StringConcat for Vec<String> {
+    fn string_concat<'a>(&self, f: fn (String) -> String) -> String {
+        let mut s = String::new();
+        for segment in self {
+            s.push_str(&f(segment.to_string()));
+        }
+        s
+    }
+}
+
 impl Display for KeyPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = String::new();
-        for segment in &self.segments {
-            s.push_str(&segment);
-            s.push_str("::");
-        }
+        let mut s = self.segments.string_concat(|seg| format!("{}::", seg));
         s.pop();
         s.pop();
         write!(f, "{}", s)
@@ -555,7 +516,7 @@ impl<'a> KeyTreeRef<'a> {
     ///     type Error = Error;
     ///  
     ///     fn try_into(self) -> Result<Temperature, Error> {
-    ///         Ok(Temperature(self.value("example::temp")?))
+    ///         Ok(Temperature(self.from_str("example::temp")?))
     ///     }
     /// }
     ///  
@@ -566,7 +527,7 @@ impl<'a> KeyTreeRef<'a> {
     ///     // Temperature(-15.3)
     /// }
     /// ```
-    pub fn value<T>(&self, key_path: &str) -> Result<T>
+    pub fn from_str<T>(&self, key_path: &str) -> Result<T>
     where 
         T: FromStr,
     {
@@ -589,7 +550,7 @@ impl<'a> KeyTreeRef<'a> {
 
     /// Returns an `Option<T: FromStr>` where `Option<T>` is the receiver type. Returns `None` if
     /// the path does not exist.
-    pub fn opt_value<T>(&self, key_path: &str) -> Result<Option<T>>
+    pub fn opt_from_str<T>(&self, key_path: &str) -> Result<Option<T>>
     where 
         T: FromStr,
     {
@@ -608,7 +569,7 @@ impl<'a> KeyTreeRef<'a> {
 
     /// Returns a `Vec<T: FromStr>` where `Vec<T>` is the receiver type. Expects at least one
     /// key-value. Use `opt_vec_value` if an empty `Vec` is permissible.
-    pub fn vec_value<T>(&self, key_path: &str) -> Result<Vec<T>>
+    pub fn vec_from_str<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         T: FromStr,
     {
@@ -628,7 +589,7 @@ impl<'a> KeyTreeRef<'a> {
     }
 
     /// Returns a `Vec<T: FromStr>` where `Vec<T>` is the receiver type. The `Vec` can be empty.
-    pub fn opt_vec_value<T>(&self, key_path: &str) -> Result<Vec<T>>
+    pub fn opt_vec_from_str<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         T: FromStr,
     {
@@ -684,11 +645,9 @@ impl<'a> KeyTreeRef<'a> {
     // Takes a `KeyPath` and follows it through the tree, returning a Vec of `KeyTreeRef`s.
     pub (crate) fn resolve_path(self, key_path: &KeyPath) -> Result<Vec<Self>> {
 
-        // Keypaths are unique and keypaths cannot resolve on multiple siblings. We keep following
-        // a path until we run out of segments. The we find the siblings of that unique path.
-
         match (self.top_token(), key_path.is_last()) {
 
+            // Last segment of key.
             (Token::Key {..}, true) => {
 
                 let parent_segment = key_path.parent_segment();
@@ -712,6 +671,7 @@ impl<'a> KeyTreeRef<'a> {
                 }
             },
 
+            // Before the last segment of key.
             (Token::Key {..}, false) => {
 
                 let mut path = key_path.clone();
@@ -735,6 +695,7 @@ impl<'a> KeyTreeRef<'a> {
                 }
             },
 
+            // Last segment of keyvalue.
             (Token::KeyValue { .. }, true) => {
 
                 let mut kt = self.clone();
@@ -746,6 +707,9 @@ impl<'a> KeyTreeRef<'a> {
                 Ok(v)
             },
 
+
+            // Before the last segment of keyvalue. If such as unresolved keypath is a keyvalue
+            // then return an error.
             (Token::KeyValue { key, value, line, .. }, false) => {
 
                 return Err(err(file!(), line!(),
