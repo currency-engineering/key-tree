@@ -155,10 +155,12 @@ use std::str::FromStr;
 
 use crate::error::*;
 
+/// The needs to be exported for other libraries to use.
+pub use crate::error::Error;
+
 use crate::parser::Builder;
 
 type Result<T> = std::result::Result<T, Error>;
-type DynResult<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
 // `KeyPath` as an iterator with a double window looking into a (parent segment, child segment).
