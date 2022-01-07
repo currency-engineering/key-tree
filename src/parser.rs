@@ -2,8 +2,8 @@
 
 use crate::{KeyTree, Token};
 use crate::builder::{Parents, SameNameSibs};
-use crate::error::*;
 
+use crate::error::{ err, Error };
 use crate::Result;
 
 const INDENT_STEP: usize = 4;

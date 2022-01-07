@@ -17,3 +17,5 @@ pub fn err(code_file: &str, code_line: u32, msg: &str) -> Error {
         msg,
     ))
 }
+
+impl std::error::Error for Error {}
