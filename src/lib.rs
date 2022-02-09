@@ -153,10 +153,10 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 
-use crate::error::*;
+use crate::error::err_inner;
 
 /// The needs to be exported for other libraries to use.
-pub use crate::error::Error;
+pub use error::Error;
 
 use crate::parser::Builder;
 
@@ -425,7 +425,7 @@ impl<'a> KeyTreeRef<'a> {
     pub (crate) fn key_into<T>(self) -> Result<T>
     where
         KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        KeyTreeRef<'a>: TryInto<T, Error = error::Error>,
     {
         // Use the client implementation `TryInto<T> for KeyTreeRef`.
         self.try_into()
@@ -460,8 +460,7 @@ impl<'a> KeyTreeRef<'a> {
     /// Returns a `KeyTree`.
     pub fn at<T>(&self, key_path: &str) -> Result<T>
     where
-        KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        Self: TryInto<T, Error = Error>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
@@ -577,7 +576,7 @@ impl<'a> KeyTreeRef<'a> {
     pub fn vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        KeyTreeRef<'a>: TryInto<T, Error = error::Error>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
@@ -598,8 +597,8 @@ impl<'a> KeyTreeRef<'a> {
     /// returns an empty `Vec`.
     pub fn opt_vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
-        KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        Self: TryInto<T>,
+        Self: TryInto<T, Error = Error>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
