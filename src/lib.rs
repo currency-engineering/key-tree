@@ -413,7 +413,7 @@ impl<'a> KeyTreeRef<'a> {
             Ok(())
         } else {
             Err(err!(
-                &format!("First segment mismatch {} {} at {}.",
+                &format!("First segment mismatch {} {} on line {}.",
                     &self.top_token(),
                     parent_segment,
                     self.top_token().line(),
