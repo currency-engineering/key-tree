@@ -1,10 +1,15 @@
 #![allow(dead_code)]
 
-use crate::{KeyTree, Token};
-use crate::builder::{Parents, SameNameSibs};
-
+use crate::{
+    builder::{Parents, SameNameSibs},
+    KeyTree, 
+    Result,
+    Token,
+};
 use err::*;
-use crate::Result;
+use std::{
+    path::{ Path, PathBuf },
+};
 
 const INDENT_STEP: usize = 4;
 
@@ -64,17 +69,31 @@ pub (crate) struct Builder<'a> {
     // Every token at indent n has a parent at indent 0 to n - 1. This parent
     parents:    Parents,
     snsibs:     SameNameSibs,
+    filename:   Option<PathBuf>
 }
 
 impl<'a> Builder<'a> {
     pub fn from_str(s: &'a str) -> Self {
-        Builder 
-         {
-            s,
+        Builder {
+            s:          s,
             tokens:     Vec::new(),
             parents:    Parents::new(),
             snsibs:     SameNameSibs::new(),
+            filename:   None,
         }
+    }
+
+    // The same as `from_str()` but keeps track of the filename for error handling. 
+    pub fn from_file(s: &'a str, f: &Path) -> Result<Self> {
+        Ok(
+            Builder {
+                s:          s,
+                tokens:     Vec::new(),
+                parents:    Parents::new(),
+                snsibs:     SameNameSibs::new(),
+                filename:   Some(f.to_path_buf()),
+            }
+        )
     }
 
     fn is_empty(&self) -> bool {
@@ -92,7 +111,10 @@ impl<'a> Builder<'a> {
 
     // Move out of Builder into Core.
     pub fn to_core(self) -> KeyTree<'a> {
-        KeyTree(self.tokens)
+        KeyTree {
+            tokens: self.tokens,
+            filename: self.filename,
+        }
     }
 
     // Each token at indent n, except the root token, has parents at each

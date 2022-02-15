@@ -145,13 +145,14 @@ mod builder;
 pub(crate) mod parser;
 pub mod serialize;
 
-use err::*;
-use std::convert::TryInto;
-use std::fmt;
-use std::fmt::Display;
-use std::str::FromStr;
-
 use crate::parser::Builder;
+use err::*;
+use std::{
+    convert::TryInto,
+    fmt::{self, Display},
+    path::PathBuf,
+    str::FromStr,
+};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -328,7 +329,10 @@ impl<'a> fmt::Display for Token<'a> {
 
 /// The parsed keytree string.
 #[derive(Debug)]
-pub struct KeyTree<'a>(Vec<Token<'a>>);
+pub struct KeyTree<'a> {
+    tokens: Vec<Token<'a>>,
+    filename: Option<PathBuf>,
+}
 
 impl<'a> KeyTree<'a> {
 
@@ -343,13 +347,13 @@ impl<'a> KeyTree<'a> {
     }
 
     pub (crate) fn siblings(&self, index: usize) -> Vec<usize> {
-        let token = self.0[index].clone();
+        let token = self.tokens[index].clone();
         
         let mut v = vec!(index);
         let mut tok = token;
         while let Some(ix) = tok.next() {
             v.push(ix);
-            tok = self.0[ix].clone();
+            tok = self.tokens[ix].clone();
         }
         v
     }
@@ -363,11 +367,11 @@ impl<'a> KeyTreeRef<'a> {
 
     /// Useful for debugging.
     pub fn current_line(&self) -> usize {
-        self.0.0[self.1].line()
+        self.0.tokens[self.1].line()
     }
 
     pub (crate) fn top_token(&self) -> &'a Token<'a> {
-        &self.0.0[self.1]
+        &self.0.tokens[self.1]
     }
 
     // Return child of the top token. If the top token is a Token::KeyValue then panic.
