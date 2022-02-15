@@ -3,7 +3,7 @@
 use crate::{KeyTree, Token};
 use crate::builder::{Parents, SameNameSibs};
 
-use crate::error::*;
+use err::*;
 use crate::Result;
 
 const INDENT_STEP: usize = 4;

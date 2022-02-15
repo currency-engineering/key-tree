@@ -142,21 +142,14 @@
 
 mod builder;
 
-#[macro_use]
-pub mod error;
-
 pub(crate) mod parser;
 pub mod serialize;
 
+use err::*;
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-
-use crate::error::err_inner;
-
-/// The needs to be exported for other libraries to use.
-pub use error::Error;
 
 use crate::parser::Builder;
 
@@ -413,10 +406,10 @@ impl<'a> KeyTreeRef<'a> {
             Ok(())
         } else {
             Err(err!(
-                &format!("First segment mismatch {} {} on line {}.",
+                &format!("First segment mismatch [{}. {} {}].",
+                    self.top_token().line(),
                     &self.top_token(),
                     parent_segment,
-                    self.top_token().line(),
                 )
             ))
         }
@@ -425,7 +418,7 @@ impl<'a> KeyTreeRef<'a> {
     pub (crate) fn key_into<T>(self) -> Result<T>
     where
         KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = error::Error>,
+        KeyTreeRef<'a>: TryInto<T, Error = Error>,
     {
         // Use the client implementation `TryInto<T> for KeyTreeRef`.
         self.try_into()
@@ -576,7 +569,7 @@ impl<'a> KeyTreeRef<'a> {
     pub fn vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = error::Error>,
+        KeyTreeRef<'a>: TryInto<T, Error = Error>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
