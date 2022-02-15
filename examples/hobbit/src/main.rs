@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 use keytree::{KeyTree, KeyTreeRef};
-use keytree::Error;
+use err::*;
 
 static HOBBITS: &'static str = r#"hobbit:
     name:         Frodo Baggins
@@ -25,7 +25,7 @@ struct Hobbit {
 impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
     type Error = Error;
 
-    fn try_into(self) -> Result<Hobbit, Error> {
+    fn try_into(self) -> Result<Hobbit, Self::Error> {
         Ok(
             Hobbit {
                 name:       self.from_str("hobbit::name")?,
@@ -38,7 +38,7 @@ impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
 }
 
 fn main() {
-    let kt = KeyTree::parse(HOBBITS).unwrap();
+    let kt = KeyTree::parse(HOBBITS, None).unwrap();
     let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
 
     dbg!(&hobbit);

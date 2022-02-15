@@ -7,9 +7,6 @@ use crate::{
     Token,
 };
 use err::*;
-use std::{
-    path::{ Path, PathBuf },
-};
 
 const INDENT_STEP: usize = 4;
 
@@ -69,31 +66,18 @@ pub (crate) struct Builder<'a> {
     // Every token at indent n has a parent at indent 0 to n - 1. This parent
     parents:    Parents,
     snsibs:     SameNameSibs,
-    filename:   Option<PathBuf>
+    filename:   Option<String>
 }
 
 impl<'a> Builder<'a> {
-    pub fn from_str(s: &'a str) -> Self {
+    pub fn from_str(s: &'a str, filename: Option<String>) -> Self {
         Builder {
             s:          s,
             tokens:     Vec::new(),
             parents:    Parents::new(),
             snsibs:     SameNameSibs::new(),
-            filename:   None,
+            filename:   filename,
         }
-    }
-
-    // The same as `from_str()` but keeps track of the filename for error handling. 
-    pub fn from_file(s: &'a str, f: &Path) -> Result<Self> {
-        Ok(
-            Builder {
-                s:          s,
-                tokens:     Vec::new(),
-                parents:    Parents::new(),
-                snsibs:     SameNameSibs::new(),
-                filename:   Some(f.to_path_buf()),
-            }
-        )
     }
 
     fn is_empty(&self) -> bool {
@@ -218,9 +202,9 @@ impl<'a> Builder<'a> {
         }
     }
 
-    // Parse a `KeyTree` string into an immutable `KeyTreeCore`. For context, see
-    // main example at the start of the documentation or in README.md
-    pub fn parse(s: &str) -> Result<KeyTree> {
+    // Parse a string into a `KeyTree`. If there is a filename, this can be input for error
+    // handling. 
+    pub fn parse(s: &str, f: Option<String>) -> Result<KeyTree> {
 
         if s == "" { return Err(err!("Empty string.")) };
 
@@ -234,7 +218,7 @@ impl<'a> Builder<'a> {
         // let mut end_val;
         let mut root_indent     = None;
 
-        let mut core_builder: Builder = Builder::from_str(s);
+        let mut core_builder: Builder = Builder::from_str(s, f);
 
         for (pos, ch) in core_builder.s.char_indices() {
 

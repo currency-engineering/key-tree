@@ -150,7 +150,6 @@ use err::*;
 use std::{
     convert::TryInto,
     fmt::{self, Display},
-    path::PathBuf,
     str::FromStr,
 };
 
@@ -331,7 +330,7 @@ impl<'a> fmt::Display for Token<'a> {
 #[derive(Debug)]
 pub struct KeyTree<'a> {
     tokens: Vec<Token<'a>>,
-    filename: Option<PathBuf>,
+    filename: Option<String>,
 }
 
 impl<'a> KeyTree<'a> {
@@ -341,9 +340,12 @@ impl<'a> KeyTree<'a> {
         KeyTreeRef(self, 0)
     }
 
-    /// Parse the keytree string.
-    pub fn parse(s: &'a str) -> Result<Self> {
-        Builder::parse(s)
+    /// Parse the keytree string. A filename can be input for error handling.
+    pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
+
+        // Option<T> into Option<String>
+        let f = filename.map(|s| s.to_string());
+        Builder::parse(s, f)
     }
 
     pub (crate) fn siblings(&self, index: usize) -> Vec<usize> {
@@ -548,7 +550,21 @@ impl<'a> KeyTreeRef<'a> {
             v.push(kt.keyvalue_into()?)
         }
         if v.is_empty() {
-            return Err(err!(&format!("Expected non-empty collection at {}.", key_path)))
+            match &self.0.filename {
+                Some(f) => {
+                    return Err(err!(&format!(
+                        "Expected non-empty collection in [{}] at [{}].",
+                        f,
+                        key_path,
+                    )))
+                },
+                None => {
+                    return Err(err!(&format!(
+                        "Expected non-empty collection at [{}].",
+                        key_path,
+                    )))
+                },
+            }
         };
         Ok(v)
     }
