@@ -6,7 +6,7 @@ use crate::{
     Result,
     Token,
 };
-use err::*;
+use located_err::*;
 
 const INDENT_STEP: usize = 4;
 

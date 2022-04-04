@@ -146,7 +146,7 @@ pub(crate) mod parser;
 pub mod serialize;
 
 use crate::parser::Builder;
-use err::*;
+use located_err::*;
 use std::{
     convert::TryInto,
     fmt::{self, Display},
