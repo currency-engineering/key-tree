@@ -145,15 +145,18 @@ mod builder;
 pub(crate) mod parser;
 pub mod serialize;
 
+use anyhow::{
+    anyhow,
+    bail,
+    Error,
+    Result,
+};
 use crate::parser::Builder;
-use located_err::*;
 use std::{
     convert::TryInto,
     fmt::{self, Display},
     str::FromStr,
 };
-
-type Result<T> = std::result::Result<T, Error>;
 
 // Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
 // `KeyPath` as an iterator with a double window looking into a (parent segment, child segment).
@@ -402,7 +405,7 @@ impl<'a> KeyTreeRef<'a> {
         match self.top_token() {
             Token::KeyValue {..} => Ok(()),
             Token::Key { key, line, .. } => {
-                Err(err!(&format!("Expected keyvalue found key {} at {}.", key, line)))
+                bail!(format!("Expected keyvalue found key {} at {}.", key, line))
             },
         }
     }
@@ -411,8 +414,8 @@ impl<'a> KeyTreeRef<'a> {
         if self.top_token().key() == parent_segment {
             Ok(())
         } else {
-            Err(err!(
-                &format!("First segment mismatch [{}. {} {}].",
+            Err(anyhow!(
+                format!("First segment mismatch [{}. {} {}].",
                     self.top_token().line(),
                     &self.top_token(),
                     parent_segment,
@@ -438,7 +441,7 @@ impl<'a> KeyTreeRef<'a> {
         let token = self.top_token();
 
         T::from_str(token.value())
-            .map_err(|_| err!( &format!("Failed to parse {} at {}.", token, token.line())))
+            .map_err(|_| anyhow!(format!("Failed to parse {} at {}.", token, token.line())))
     }
 
     /// Returns a `Some<KeyTree>` if the path exists or `None` otherwise.
@@ -452,7 +455,7 @@ impl<'a> KeyTreeRef<'a> {
         match kts.len() {
             0 => Ok(None),
             1 => Ok(Some(kts[0].key_into()?)),
-            _ => Err(err!(&format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -464,9 +467,9 @@ impl<'a> KeyTreeRef<'a> {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
         match kts.len() {
-            0 => Err(err!(&format!("Expected unique keyvalue found none at {}.", key_path))),
+            0 => Err(anyhow!(format!("Expected unique keyvalue found none at {}.", key_path))),
             1 => Ok(kts[0].key_into()?),
-            _ => Err(err!(&format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -515,9 +518,9 @@ impl<'a> KeyTreeRef<'a> {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
         match kts.len() {
-            0 => Err(err!(&format!("Expected unique keyvalue found none at {}.", key_path))),
+            0 => Err(anyhow!(format!("Expected unique keyvalue found none at {}.", key_path))),
             1 => Ok(kts[0].keyvalue_into()?),
-            _ => Err(err!(&format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -532,7 +535,7 @@ impl<'a> KeyTreeRef<'a> {
         match kts.len() {
             0 => Ok(None),
             1 => Ok(Some(kts[0].keyvalue_into()?)),
-            _ => Err(err!(&format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -552,14 +555,14 @@ impl<'a> KeyTreeRef<'a> {
         if v.is_empty() {
             match &self.0.filename {
                 Some(f) => {
-                    return Err(err!(&format!(
+                    return Err(anyhow!(format!(
                         "Expected non-empty collection in [{}] at [{}].",
                         f,
                         key_path,
                     )))
                 },
                 None => {
-                    return Err(err!(&format!(
+                    return Err(anyhow!(format!(
                         "Expected non-empty collection at [{}].",
                         key_path,
                     )))
@@ -600,7 +603,7 @@ impl<'a> KeyTreeRef<'a> {
         }
         if v.is_empty() {
             return Err(
-                err!(&format!("Expected non-empty collection at {}.", key_path))
+                anyhow!(format!("Expected non-empty collection at {}.", key_path))
             )
         };
         Ok(v)
@@ -692,8 +695,8 @@ impl<'a> KeyTreeRef<'a> {
             // then return an error.
             (Token::KeyValue { key, value, line, .. }, false) => {
 
-                return Err(err!(
-                    &format!("Line {} keypath {}. Keypath_extends_beyond_keyvalue {}: {}.",
+                return Err(anyhow!(
+                    format!("Line {} keypath {}. Keypath_extends_beyond_keyvalue {}: {}.",
                         *line,
                         &key_path,
                         key,

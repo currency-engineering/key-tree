@@ -1,6 +1,6 @@
 use std::convert::TryInto;
 use keytree::{KeyTree, KeyTreeRef};
-use err::*;
+use anyhow::Error;
 
 static HOBBITS: &'static str = r#"hobbit:
     name:         Frodo Baggins

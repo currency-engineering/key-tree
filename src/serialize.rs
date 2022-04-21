@@ -205,7 +205,7 @@ fn test_1() {
     kt_string.push_keyvalue(1, "key", "value");
     assert_eq!(
         kt_string.to_string(),
-        "    key:    value",
+        "    key:    value\n",
     )
 }
 
@@ -215,7 +215,7 @@ fn test_2() {
     kt_string.push_keyvalue(0, "key", "value");
     assert_eq!(
         kt_string.to_string(),
-        "key:    value",
+        "key:    value\n",
     )
 }
 
@@ -225,7 +225,7 @@ fn test_3() {
     kt_string.push_keyvalue(0, "ky", "value");
     assert_eq!(
         kt_string.to_string(),
-        "ky: value",
+        "ky: value\n",
     )
 }
 

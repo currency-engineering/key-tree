@@ -2,15 +2,18 @@
 name = "keytree"
 version = "0.1.0"
 authors = ["Eric Findlay <e.findlay@protonmail.ch>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-located_err = { path = "../located_err" }
+anyhow = "1"
 
 [workspace]
 members = [ "examples/hobbit" ]
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+indoc = "1"
