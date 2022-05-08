@@ -85,8 +85,6 @@
 //! The deserializing function should look something like
 //!
 //! ``` 
-//!     // For error messages, the second argument None can be replaced with a filename in the
-//!     // form`Some("..")` or `Some(Path::new(".."))`.
 //!     let kt = KeyTree::parse(s, None).unwrap();
 //!
 //!     // kt.to_ref() creates a reference to kt.
@@ -153,7 +151,6 @@ use anyhow::{
 };
 use std::{
     convert::TryInto,
-    ffi::OsStr,
     fmt::{self, Display},
     str::FromStr,
 };
@@ -337,22 +334,16 @@ pub struct KeyTree<'a> {
     filename: Option<String>,
 }
 
-fn osstr_to_string<S: AsRef<OsStr> + ?Sized>(s: &S) -> Result<String> {
-    Ok(s.as_ref()
-        .to_str()
-        .ok_or(anyhow!("Failed to parse filename"))?
-        .to_string())
-}
-
 impl<'a> KeyTree<'a> {
 
     /// Parse the keytree string. A filename can be input for error handling.
-    pub fn parse<S: AsRef<OsStr> + ?Sized>(s: &'a str, filename: Option<&S>) -> Result<Self> {
-        let f = match filename {
-            Some(s) => Some(osstr_to_string(s)?),
-            None => None,
-        };
+    pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
+        let f = filename.map(|s| s.to_string());
         Builder::parse(s, f)
+    }
+    
+    pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
+        KeyTreeRef(&self, 0)
     }
 
     pub (crate) fn siblings(&self, index: usize) -> Vec<usize> {
