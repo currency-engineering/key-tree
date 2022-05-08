@@ -1,7 +1,6 @@
 //! Module to serialize a Rust data-structure into a nicely-formatted keytree string.
 
-use std::fmt;
-use std::fmt::Display;
+use core::fmt::{self, Display};
 
 pub trait IntoKeyTree {
     fn keytree(&self) -> KeyTreeString;

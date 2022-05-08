@@ -85,11 +85,11 @@
 //! The deserializing function should look something like
 //!
 //! ``` 
-//!     // Creates an 'abstract syntax tree' which is just a set of references into the keytree string s.
-//!     let kt = KeyTree::parse(s).unwrap();
+//!     // For error messages, the second argument None can be replaced with a filename in the
+//!     // form`Some("..")` or `Some(Path::new(".."))`.
+//!     let kt = KeyTree::parse(s, None).unwrap();
 //!
 //!     // kt.to_ref() creates a reference to kt.
-//!     // try_into() does all the deserialization work.
 //!     let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
 //!     &dbg!(&hobbit);
 //!
@@ -151,12 +151,13 @@ use anyhow::{
     Error,
     Result,
 };
-use crate::parser::Builder;
 use std::{
     convert::TryInto,
+    ffi::OsStr,
     fmt::{self, Display},
     str::FromStr,
 };
+use crate::parser::Builder;
 
 // Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
 // `KeyPath` as an iterator with a double window looking into a (parent segment, child segment).
@@ -336,18 +337,21 @@ pub struct KeyTree<'a> {
     filename: Option<String>,
 }
 
+fn osstr_to_string<S: AsRef<OsStr> + ?Sized>(s: &S) -> Result<String> {
+    Ok(s.as_ref()
+        .to_str()
+        .ok_or(anyhow!("Failed to parse filename"))?
+        .to_string())
+}
+
 impl<'a> KeyTree<'a> {
 
-    /// Returns a lightweight reference to the root of `KeyTree`.
-    pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
-        KeyTreeRef(self, 0)
-    }
-
     /// Parse the keytree string. A filename can be input for error handling.
-    pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
-
-        // Option<T> into Option<String>
-        let f = filename.map(|s| s.to_string());
+    pub fn parse<S: AsRef<OsStr> + ?Sized>(s: &'a str, filename: Option<&S>) -> Result<Self> {
+        let f = match filename {
+            Some(s) => Some(osstr_to_string(s)?),
+            None => None,
+        };
         Builder::parse(s, f)
     }
 
