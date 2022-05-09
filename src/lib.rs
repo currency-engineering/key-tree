@@ -338,18 +338,8 @@ pub struct KeyTree<'a> {
 impl<'a> KeyTree<'a> {
 
     /// Parse the keytree string. A filename can be input for error handling.
-    pub fn parse(s: &'a str, filename: Option<PathBuf>) -> Result<Self> {
-        let f = match filename {
-            Some(s) => {
-                Some(
-                    s.to_str()
-                        .ok_or(anyhow!("Could not parse filename"))?
-                        .to_string()
-                )
-            },
-            None => None
-        };
-        Builder::parse(s, f)
+    pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
+        Builder::parse(s, filename.map(|s| String::from(s)))
     }
     
     pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
