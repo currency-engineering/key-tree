@@ -152,7 +152,6 @@ use anyhow::{
 use std::{
     convert::TryInto,
     fmt::{self, Display},
-    path::PathBuf,
     str::FromStr,
 };
 use crate::parser::Builder;
@@ -210,7 +209,7 @@ impl KeyPath {
     pub (crate) fn from_str(s: &str) -> Self {
         let v = s.split(':')
             .filter(|s| !s.is_empty())
-            .map(|s| String::from(s))
+            .map(String::from)
             .collect::<Vec<String>>();
         KeyPath {
             segments: v,
@@ -220,11 +219,11 @@ impl KeyPath {
 }
 
 trait StringConcat {
-    fn string_concat<'a>(&self, f: fn (String) -> String) -> String;
+    fn string_concat(&self, f: fn (String) -> String) -> String;
 }
 
 impl StringConcat for Vec<String> {
-    fn string_concat<'a>(&self, f: fn (String) -> String) -> String {
+    fn string_concat(&self, f: fn (String) -> String) -> String {
         let mut s = String::new();
         for segment in self {
             s.push_str(&f(segment.to_string()));
@@ -339,11 +338,11 @@ impl<'a> KeyTree<'a> {
 
     /// Parse the keytree string. A filename can be input for error handling.
     pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
-        Builder::parse(s, filename.map(|s| String::from(s)))
+        Builder::parse(s, filename.map(String::from))
     }
     
     pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
-        KeyTreeRef(&self, 0)
+        KeyTreeRef(self, 0)
     }
 
     pub (crate) fn siblings(&self, index: usize) -> Vec<usize> {
@@ -387,7 +386,7 @@ impl<'a> KeyTreeRef<'a> {
                         return Some(*ix)
                     }
                 }
-                return None
+                None
             },
         }
     }
@@ -640,7 +639,7 @@ impl<'a> KeyTreeRef<'a> {
                     None =>  Ok(Vec::new()),
                     Some(ix) => {
                         let mut v = Vec::new();
-                        let mut kt = self.clone();
+                        let mut kt = self;
                         for sibling_ix in self.0.siblings(ix) {
                             kt.set_cursor(sibling_ix);
                             v.push(kt);
@@ -666,7 +665,7 @@ impl<'a> KeyTreeRef<'a> {
                         Ok(Vec::new())   // Option
                     },
                     Some(ix) => {
-                        let mut kt = self.clone();
+                        let mut kt = self;
                         kt.set_cursor(ix);
                         path.advance();
                         kt.resolve_path(&path)
@@ -677,7 +676,7 @@ impl<'a> KeyTreeRef<'a> {
             // Last segment of keyvalue.
             (Token::KeyValue { .. }, true) => {
 
-                let mut kt = self.clone();
+                let mut kt = self;
                 let mut v = Vec::new();
                 for sibling_ix in self.0.siblings(self.1) {
                     kt.set_cursor(sibling_ix);

@@ -89,7 +89,7 @@ impl KeyTreeString {
     pub fn push_key(&mut self, indent: usize, key: &str) {
         let key = Token::KeyToken(
             KeyToken {
-                indent: indent,
+                indent,
                 key: String::from(key),
             }
         );
@@ -98,7 +98,7 @@ impl KeyTreeString {
 
     pub fn push_opt_value<T: Display>(&mut self, indent: usize, key: &str, value: Option<T>) {
         match value {
-            None => return,
+            None => {},
             Some(v) => {
                 self.push_keyvalue(indent, key, v.to_string().as_str())
             },
@@ -109,7 +109,7 @@ impl KeyTreeString {
     pub fn push_keyvalue<T: Display>(&mut self, indent: usize, key: &str, value: T) {
         let kv = Token::KeyValToken(
             KeyValToken {
-                indent: indent,
+                indent,
                 key: String::from(key),
                 val: value.to_string(),
             }

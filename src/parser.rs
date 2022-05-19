@@ -16,14 +16,14 @@ const INDENT_STEP: usize = 4;
 // Parser state. Used in parser() function.
 #[derive(Clone, Debug, PartialEq)]
 enum PS {
-    FC,       // First char.
-    BK,       // Before key.
-    COK,      // Comment or key
-    IK,       // In key.
-    RAK,      // The character right after the key.
-    AK,       // After key.
-    IV,       // In value.
-    CM,       // In comment
+    Fc,       // First char.
+    Bk,       // Before key.
+    Cok,      // Comment or key
+    Ik,       // In key.
+    Rak,      // The character right after the key.
+    Ak,       // After key.
+    Iv,       // In value.
+    Cm,       // In comment
 }
 
 pub struct BadIndent(usize);
@@ -41,7 +41,7 @@ impl BadIndent {
 }
 
 // Chars received
-enum Char  {
+enum Punct  {
     Char, 
     Colon,
     ForwardSlash,
@@ -49,14 +49,14 @@ enum Char  {
     Whitespace,
 }
 
-impl Char {
+impl Punct {
     fn from_char(c: char) -> Self {
-        if c == '\n' { return Char::Newline };
-        if c.is_whitespace() { return Char::Whitespace };
+        if c == '\n' { return Punct::Newline };
+        if c.is_whitespace() { return Punct::Whitespace };
         match c {
-            ':' => Char::Colon,
-            '/' => Char::ForwardSlash,
-            _ => Char::Char
+            ':' => Punct::Colon,
+            '/' => Punct::ForwardSlash,
+            _ => Punct::Char
         }
     }
 }
@@ -73,31 +73,25 @@ pub (crate) struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    pub fn from_str(s: &'a str, filename: Option<String>) -> Self {
+    fn from_str(s: &'a str, filename: Option<String>) -> Self {
         Builder {
-            s:          s,
+            s,
             tokens:     Vec::new(),
             parents:    Parents::new(),
             snsibs:     SameNameSibs::new(),
-            filename:   filename,
+            filename,
         }
     }
 
-    fn is_empty(&self) -> bool {
-        self.tokens.is_empty()
-    }
+    fn is_empty(&self) -> bool { self.tokens.is_empty() }
 
-    pub fn token(&self, ix: usize) -> &Token<'a> {
-        &self.tokens[ix]
-    }
+    fn token(&self, ix: usize) -> &Token<'a> { &self.tokens[ix] }
 
     // Returns the next() value of ixth token.
-    pub fn next(&self, ix: usize) -> Option<usize> {
-        self.token(ix).next()
-    }
+    fn next(&self, ix: usize) -> Option<usize> { self.token(ix).next() }
 
     // Move out of Builder into Core.
-    pub fn to_core(self) -> KeyTree<'a> {
+    fn to_core(self) -> KeyTree<'a> {
         KeyTree {
             tokens: self.tokens,
             filename: self.filename,
@@ -209,9 +203,9 @@ impl<'a> Builder<'a> {
     // handling. 
     pub fn parse(s: &str, f: Option<String>) -> Result<KeyTree> {
 
-        if s == "" { return Err(anyhow!("Empty string.")) };
+        if s.is_empty() { return Err(anyhow!("Empty string.")) };
 
-        let mut parse_state: PS = PS::FC;
+        let mut parse_state: PS = PS::Fc;
 
         let mut line            = 0;
         let mut line_start      = 0;
@@ -225,68 +219,68 @@ impl<'a> Builder<'a> {
 
         for (pos, ch) in core_builder.s.char_indices() {
 
-            match (&parse_state, Char::from_char(ch)) {
+            match (&parse_state, Punct::from_char(ch)) {
 
                 // Matches are ordered by estimated rate of occurence.
 
                 // Whitespace, no errors.
 
-                (PS::FC, Char::Whitespace) => {
+                (PS::Fc, Punct::Whitespace) => {
                     line_start = pos;
-                    parse_state = PS::BK;
+                    parse_state = PS::Bk;
                 },
-                (PS::BK, Char::Whitespace) => { },
-                (PS::CM, Char::Whitespace) => { },
-                (PS::RAK, Char::Whitespace) => {
-                    parse_state = PS::AK;
+                (PS::Bk, Punct::Whitespace) => { },
+                (PS::Cm, Punct::Whitespace) => { },
+                (PS::Rak, Punct::Whitespace) => {
+                    parse_state = PS::Ak;
                 },
-                (PS::AK, Char::Whitespace) => { },
-                (PS::IV, Char::Whitespace) => { },
+                (PS::Ak, Punct::Whitespace) => { },
+                (PS::Iv, Punct::Whitespace) => { },
 
                 // Char, no errors.
 
-                (PS::AK, Char::Char) => {
+                (PS::Ak, Punct::Char) => {
                     start_val = pos;
-                    parse_state = PS::IV;
+                    parse_state = PS::Iv;
                 },
-                (PS::IV, Char::Char) => {},
-                (PS::FC, Char::Newline) => {
+                (PS::Iv, Punct::Char) => {},
+                (PS::Fc, Punct::Newline) => {
                     line += 1;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
-                (PS::FC, Char::Char) => {
+                (PS::Fc, Punct::Char) => {
                     line_start = pos;
                     start_key = pos;
-                    parse_state = PS::IK;
+                    parse_state = PS::Ik;
                 },
-                (PS::BK, Char::Char) => {
+                (PS::Bk, Punct::Char) => {
                     start_key = pos;
-                    parse_state = PS::IK;
+                    parse_state = PS::Ik;
                 },
-                (PS::COK, Char::Char) => {
-                    parse_state = PS::IK;
+                (PS::Cok, Punct::Char) => {
+                    parse_state = PS::Ik;
                 },
-                (PS::CM, Char::Char) => { },
-                (PS::IK, Char::Char) => {}
+                (PS::Cm, Punct::Char) => { },
+                (PS::Ik, Punct::Char) => {}
 
                 // Newline, no errors
 
-                (PS::BK, Char::Newline) => {
+                (PS::Bk, Punct::Newline) => {
                     line += 1;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
-                (PS::CM, Char::Newline) => {
+                (PS::Cm, Punct::Newline) => {
                     line += 1;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
 
-                (PS::RAK, Char::Newline) => {
+                (PS::Rak, Punct::Newline) => {
                     line += 1;
                     let token = Token::Key {
                         key:        &s[start_key..=end_key],
                         children:   Vec::new(),
                         next:       None,
-                        line:       line,
+                        line,
                     };
                     let indent = indent(
                         &mut root_indent,
@@ -294,16 +288,16 @@ impl<'a> Builder<'a> {
                         start_key
                     ).map_err(|err| err.from_inner(&token, line))?;
                     core_builder.append(indent, token)?;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
 
-                (PS::AK, Char::Newline) => {
+                (PS::Ak, Punct::Newline) => {
                     line += 1;
                     let token = Token::Key {
                         key:        &s[start_key..=end_key],
                         children:   Vec::new(),
                         next:       None,
-                        line:       line,
+                        line,
                     };
                     let indent = indent(    
                         &mut root_indent,
@@ -311,15 +305,15 @@ impl<'a> Builder<'a> {
                         start_key
                     ).map_err(|e| e.from_inner(&token, line))?;
                     core_builder.append(indent, token)?;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
-                (PS::IV, Char::Newline) => {
+                (PS::Iv, Punct::Newline) => {
                     line += 1;
                     let token = Token::KeyValue {
                         key:    &s[start_key..=end_key],
                         value:  &s[start_val..=pos - 1],
                         next:   None,
-                        line:   line,
+                        line,
                     };
                     let indent = indent(
                         &mut root_indent,
@@ -328,57 +322,57 @@ impl<'a> Builder<'a> {
                     ).map_err(|e| e.from_inner(&token, line))?;
 
                     core_builder.append(indent, token)?;
-                    parse_state = PS::FC;
+                    parse_state = PS::Fc;
                 },
 
                 // Colon, no errors
 
-                (PS::COK, Char::Colon) => {
-                    parse_state = PS::IK;
+                (PS::Cok, Punct::Colon) => {
+                    parse_state = PS::Ik;
                 },
-                (PS::CM, Char::Colon) => { },
-                (PS::IV, Char::Colon) => {},
-                (PS::AK, Char::Colon) => {
+                (PS::Cm, Punct::Colon) => { },
+                (PS::Iv, Punct::Colon) => {},
+                (PS::Ak, Punct::Colon) => {
                     start_val = pos;
-                    parse_state = PS::IV;
+                    parse_state = PS::Iv;
                 },
-                (PS::IK, Char::Colon) => {
+                (PS::Ik, Punct::Colon) => {
                     end_key = pos - 1;
-                    parse_state = PS::RAK;
+                    parse_state = PS::Rak;
                 }
 
                 // Forward slash, no errors
 
 
-                (PS::COK, Char::ForwardSlash) => {
-                    parse_state = PS::CM;
+                (PS::Cok, Punct::ForwardSlash) => {
+                    parse_state = PS::Cm;
                 },
-                (PS::FC, Char::ForwardSlash) => {
+                (PS::Fc, Punct::ForwardSlash) => {
                     line_start = pos;
                     start_key = pos;
-                    parse_state = PS::COK;
+                    parse_state = PS::Cok;
                 },
-                (PS::CM, Char::ForwardSlash) => {},
-                (PS::BK, Char::ForwardSlash) => {
+                (PS::Cm, Punct::ForwardSlash) => {},
+                (PS::Bk, Punct::ForwardSlash) => {
                     start_key = pos;
-                    parse_state = PS::COK;
+                    parse_state = PS::Cok;
                 },
-                (PS::IK, Char::ForwardSlash) => {}
-                (PS::AK, Char::ForwardSlash) => {
+                (PS::Ik, Punct::ForwardSlash) => {}
+                (PS::Ak, Punct::ForwardSlash) => {
                     start_val = pos;
-                    parse_state = PS::IV;
+                    parse_state = PS::Iv;
                 },
-                (PS::IV, Char::ForwardSlash) => {},
+                (PS::Iv, Punct::ForwardSlash) => {},
 
                 // Whitespace errors
 
-                (PS::IK, Char::Whitespace) => {
+                (PS::Ik, Punct::Whitespace) => {
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
                         anyhow!(format!("No colon after key {} at line {}.", &token_str, line + 1))
                     )
                 },
-                (PS::COK, Char::Whitespace) => {
+                (PS::Cok, Punct::Whitespace) => {
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
                         anyhow!(format!("Incomplete comment of key {} at {}.", &token_str, line + 1))
@@ -387,7 +381,7 @@ impl<'a> Builder<'a> {
 
                 // Char errors
 
-                (PS::RAK, Char::Char) => {
+                (PS::Rak, Punct::Char) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(
@@ -397,13 +391,13 @@ impl<'a> Builder<'a> {
 
                 // Newline errors
 
-                (PS::COK, Char::Newline) => {
+                (PS::Cok, Punct::Newline) => {
                     line += 1;
                     return Err(
                         anyhow!(format!("Incomplete line {} at {}.", &String::from("/"), line))
                     )
                 },
-                (PS::IK, Char::Newline) => {
+                (PS::Ik, Punct::Newline) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(anyhow!(format!("Incomplete line {} at {}.", &token_str, line)))
@@ -411,17 +405,17 @@ impl<'a> Builder<'a> {
 
                 // Colon, errors
 
-                (PS::FC, Char::Colon) => {
+                (PS::Fc, Punct::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(anyhow!(format!("Colon before key {} at {}.", &token_str, line)))
                 },
-                (PS::BK, Char::Colon) => {
+                (PS::Bk, Punct::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(anyhow!(format!("Colon before key {} at {}.", &token_str, line)))
                 },
-                (PS::RAK, Char::Colon) => {
+                (PS::Rak, Punct::Colon) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(anyhow!(format!("No space after key {} at {}.", &token_str, line)))
@@ -429,7 +423,7 @@ impl<'a> Builder<'a> {
 
                 // Forward slash errors
 
-                (PS::RAK, Char::ForwardSlash) => {
+                (PS::Rak, Punct::ForwardSlash) => {
                     line += 1;
                     let token_str = &s[start_key..=pos - 1];
                     return Err(anyhow!(format!("No space after key {} at line {}.", &token_str, line)))
@@ -441,24 +435,24 @@ impl<'a> Builder<'a> {
         // Handle strings that don't end in '\n".
 
         match parse_state {
-            PS::FC => {},
-            PS::BK => {},
-            PS::COK => {
+            PS::Fc => {},
+            PS::Bk => {},
+            PS::Cok => {
                 let token_str = &s[start_key..];
                 return Err(anyhow!(format!("Incomplete comment or key {} at line {}.", &token_str, line)))
             },
-            PS::IK => { 
+            PS::Ik => { 
                 line += 1;
                 let token_str = &s[start_key..];
                 return Err(anyhow!(format!("Incomplete line {} at {}.", &token_str, line)))
             },
-            PS::RAK => {
+            PS::Rak => {
                 line += 1;
                 let token = Token::Key {
                     key: &s[start_key..s.chars().count() - 1],
                     children: Vec::new(),
                     next: None,
-                    line: line,
+                    line,
                 };
                 let indent = indent(
                     &mut root_indent,
@@ -467,13 +461,13 @@ impl<'a> Builder<'a> {
                 ).map_err(|e| e.from_inner(&token, line))?;
                 core_builder.append(indent, token)?;
             },
-            PS::AK => {
+            PS::Ak => {
                 line += 1;
                 let token = Token::Key {
                     key:        &s[start_key..],
                     children:   Vec::new(),
                     next:       None,
-                    line:       line,
+                    line,
                 };
                 let indent = indent(
                     &mut root_indent,
@@ -482,13 +476,13 @@ impl<'a> Builder<'a> {
                 ).map_err(|e| e.from_inner(&token, line))?;
                 core_builder.append(indent, token)?;
             },
-            PS::IV => {
+            PS::Iv => {
                 line += 1;
                 let token = Token::KeyValue {
                     key: &s[start_key..=end_key],
                     value: &s[start_val..],
                     next: None,
-                    line: line,
+                    line,
                 };
                 let indent = indent(
                     &mut root_indent,
@@ -497,7 +491,7 @@ impl<'a> Builder<'a> {
                 ).map_err(|e| e.from_inner(&token, line))?;
                 core_builder.append(indent, token)?;
             },
-            PS::CM => {},
+            PS::Cm => {},
         };
 
         match core_builder.is_empty() {
@@ -526,7 +520,7 @@ fn indent(
                 *root_indent;
 
             if chars_indent % INDENT_STEP != 0 {
-                return Err(BadIndent(chars_indent))
+                Err(BadIndent(chars_indent))
             } else {
                 Ok(chars_indent / INDENT_STEP)
             }
