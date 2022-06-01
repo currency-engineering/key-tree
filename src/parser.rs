@@ -1,15 +1,8 @@
 #![allow(dead_code)]
 
-use anyhow::{
-    anyhow,
-    Error,
-    Result,
-};
-use crate::{
-    builder::{Parents, SameNameSibs},
-    KeyTree, 
-    Token,
-};
+use anyhow::{anyhow, Error, Result};
+use crate::{builder::{Parents, SameNameSibs}, KeyTree, Token};
+use std::path::{Path, PathBuf};
 
 const INDENT_STEP: usize = 4;
 
@@ -69,17 +62,17 @@ pub (crate) struct Builder<'a> {
     // Every token at indent n has a parent at indent 0 to n - 1. This parent
     parents:    Parents,
     snsibs:     SameNameSibs,
-    filename:   Option<String>
+    filename:   Option<PathBuf>
 }
 
 impl<'a> Builder<'a> {
-    fn from_str(s: &'a str, filename: Option<String>) -> Self {
+    fn from_str(s: &'a str, filename: Option<&Path>) -> Self {
         Builder {
             s,
             tokens:     Vec::new(),
             parents:    Parents::new(),
             snsibs:     SameNameSibs::new(),
-            filename,
+            filename:   filename.map(|path| path.to_path_buf()),
         }
     }
 
@@ -201,7 +194,7 @@ impl<'a> Builder<'a> {
 
     // Parse a string into a `KeyTree`. If there is a filename, this can be input for error
     // handling. 
-    pub fn parse(s: &str, f: Option<String>) -> Result<KeyTree> {
+    pub fn parse(s: &'a str, f: Option<&Path>) -> Result<KeyTree<'a>> {
 
         if s.is_empty() { return Err(anyhow!("Empty string.")) };
 

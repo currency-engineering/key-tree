@@ -143,17 +143,8 @@ mod builder;
 pub(crate) mod parser;
 pub mod serialize;
 
-use anyhow::{
-    anyhow,
-    bail,
-    Error,
-    Result,
-};
-use std::{
-    convert::TryInto,
-    fmt::{self, Display},
-    str::FromStr,
-};
+use anyhow::{anyhow, bail, Error, Result};
+use std::{convert::TryInto, fmt::{self, Display}, path::{Path, PathBuf}, str::FromStr};
 use crate::parser::Builder;
 
 // Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
@@ -331,14 +322,14 @@ impl<'a> fmt::Display for Token<'a> {
 #[derive(Debug)]
 pub struct KeyTree<'a> {
     tokens: Vec<Token<'a>>,
-    filename: Option<String>,
+    filename: Option<PathBuf>,
 }
 
 impl<'a> KeyTree<'a> {
 
     /// Parse the keytree string. A filename can be input for error handling.
-    pub fn parse(s: &'a str, filename: Option<&str>) -> Result<Self> {
-        Builder::parse(s, filename.map(String::from))
+    pub fn parse(s: &'a str, filename: Option<&Path>) -> Result<Self> {
+        Builder::parse(s, filename)
     }
     
     pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
@@ -551,7 +542,7 @@ impl<'a> KeyTreeRef<'a> {
                 Some(f) => {
                     return Err(anyhow!(format!(
                         "Expected non-empty collection in [{}] at [{}].",
-                        f,
+                        f.display(),
                         key_path,
                     )))
                 },
