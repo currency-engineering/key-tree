@@ -273,7 +273,7 @@ impl Token {
         }
     }
 
-    pub (crate) fn next(&self) -> Option<usize> {
+    pub(crate) fn next(&self) -> Option<usize> {
         match self {
             Token::Key {next: n, ..} => *n,
             Token::KeyValue {next: n, ..} => *n,
@@ -285,23 +285,6 @@ impl Token {
         match self {
             Token::Key {children, ..} => children.to_vec(),
             Token::KeyValue {..} => panic!("This is a bug"),
-        }
-    }
-
-    // Used during building of keytree. Set the next iteration of the Token to a token with
-    // token index.
-    pub (crate) fn set_next_link(&mut self, ix: usize) {
-        match self {
-            Token::Key {ref mut next, ..} => *next = Some(ix),
-            Token::KeyValue {ref mut next, ..} => *next = Some(ix),
-        }
-    }
-
-    // Used during building of keytree.
-    pub (crate) fn set_link_to_child(&mut self, child_ix: usize) {
-        match self {
-            Token::Key {children, ..} => children.push(child_ix),
-            Token::KeyValue {..} => { panic!("This is a bug") },
         }
     }
 }
@@ -335,7 +318,6 @@ impl TokenDebugInfo {
 #[derive(Debug)]
 pub struct KeyTree {
     data: KeyTreeData,
-    debug: DebugInfo,
     index: usize,
 }
 
@@ -389,8 +371,8 @@ impl KeyTree {
     ///     .unwrap();
     /// ```
     pub fn parse_str(s: &str) -> Result<KeyTree> {
-        let (data, debug) = Parser::parse_str(s)?;
-        Ok(Self::new(data, debug))
+        let (data, _) = Parser::parse_str(s)?;
+        Ok(Self::new(data))
     }
 
     /// Parse a file into a data-structure.
@@ -401,14 +383,13 @@ impl KeyTree {
     ///     .unwrap();
     /// ```
     pub fn parse<P: AsRef<Path>>(path: P) -> Result<KeyTree> {
-        let (data, debug) = Parser::parse(path)?;
-        Ok(Self::new(data, debug))
+        let (data, _) = Parser::parse(path)?;
+        Ok(Self::new(data))
     }
 
-    pub(crate) fn new(data: KeyTreeData, debug: DebugInfo) -> Self {
+    pub(crate) fn new(data: KeyTreeData) -> Self {
         KeyTree {
             data,
-            debug,
             index: 0,
         }
     }
@@ -502,7 +483,6 @@ impl KeyTree {
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
-        dbg!("here");
         match kts.len() {
             0 => Err(KeyTreeError::Search(format!("Expected unique keyvalue found none at {}.", key_path))),
             1 => Ok(kts[0].clone().key_into()?),
@@ -591,21 +571,10 @@ impl KeyTree {
             v.push(kt.keyvalue_into()?)
         }
         if v.is_empty() {
-            match &self.debug.file {
-                Some(f) => {
-                    return Err(KeyTreeError::Search(format!(
-                        "Expected non-empty collection in [{}] at [{}].",
-                        f.display(),
-                        key_path,
-                    )))
-                },
-                None => {
-                    return Err(KeyTreeError::Search(format!(
-                        "Expected non-empty collection at [{}].",
-                        key_path,
-                    )))
-                },
-            }
+            return Err(KeyTreeError::Search(format!(
+                "Expected non-empty collection at [{}].",
+                key_path,
+            )))
         };
         Ok(v)
     }
@@ -751,7 +720,6 @@ impl Clone for KeyTree {
     fn clone(&self) -> Self {
         Self {
             data: self.data.clone(),
-            debug: self.debug.clone(),
             index: self.index,
         }
     }
@@ -836,24 +804,6 @@ mod test {
     fn keyval_token_should_have_value() {
         let tok = keyval_token();
         assert_eq!(tok.value(), &"value".to_owned());
-    }
-
-    #[test]
-    fn set_next_link_should_work() {
-        let mut tok = keyval_token();
-        tok.set_next_link(12);
-        assert_eq!(tok.next(), Some(12));
-    }
-
-    #[test]
-    fn set_link_to_child_should_work() {
-        let mut tok =key_token();
-        tok.set_link_to_child(13);
-        let children = tok.children();
-        let mut iter = children.iter();
-        assert_eq!(iter.next(), Some(&1));
-        assert_eq!(iter.next(), Some(&13));
-        assert_eq!(iter.next(), None);
     }
 
     // === KeyTreeData tests ===================================================================

@@ -41,6 +41,7 @@ impl Punct {
 // === Builder ====================================================================================
 
 // Holds on to some extra start while we are building a KeyTree.
+#[derive(Debug)]
 pub (crate) struct Builder {
     pub(crate) data: KeyTreeData,
     last_tokens: LastTokens,
@@ -90,78 +91,126 @@ impl Builder {
 
     fn set_parent_link(&mut self, indent: usize, child_ix: usize) {
         let parent_ix = self.last_tokens.parent(indent);
-        self.data.0[parent_ix].set_link_to_child(child_ix);
+        self.set_link_to_child(parent_ix, child_ix);
+    }
+
+    fn set_next_link(&mut self, previous_sib_ix: usize, sib_ix: usize) {
+        match self.data.0.get_mut(previous_sib_ix) {
+            Some(Token::Key {next,..}) => *next = Some(sib_ix),
+            Some(Token::KeyValue {ref mut next,..}) => *next = Some(sib_ix),
+            None => { panic!("This is a bug") },
+        }
+    }
+
+    fn set_link_to_child(&mut self, parent_ix: usize, child_ix: usize) {
+        match &mut self.data.0.get_mut(parent_ix) {
+            Some(Token::Key {children,..}) => {
+                children.push(child_ix);
+            },
+            Some(Token::KeyValue {..}) => { panic!("This is a bug") },
+            None => { panic!("This is a bug") },
+        }
+    }
+
+    fn previous_sib_ix(&self, indent: usize, token: &Token) -> Option<usize> {
+        match self.last_tokens.last(indent) {
+            Some(previous_sib_ix) => {
+
+                let previous_sib = self.data.token(previous_sib_ix);
+                if previous_sib.key() == token.key() {
+                    Some(previous_sib_ix)
+                } else {
+                    None
+                }
+            },
+            None => None
+        }
     }
 
     // This is the main function that builds a KeyTreeData. Should only be called by append();
     fn append_non_first_token(&mut self, new_indent: usize, token: Token) -> Result<usize> {
 
-        let ix = match usize::cmp(&new_indent, &self.indent) {
+        let indent_delta = usize::cmp(&new_indent, &self.indent);
 
-            // When the indent increases, we need to add a the token as a child.
-            //  hobbit:
-            //     name:   Frodo
-            Ordering::Greater => {
+        let previous_sib_ix = self.previous_sib_ix(new_indent, &token);
+
+        let ix = match (indent_delta, previous_sib_ix) {
+
+            (Ordering::Greater, _) => {
 
                 // Append the new token to the keytree Vec.
                 let ix = self.data.append_token(token);
+
+                // Set parent for every new token, other than those that have a previous sibling.
+                self.set_parent_link(new_indent, ix);
 
                 // Append the new token to last.
                 self.last_tokens.add(new_indent, ix);
 
-                // Add child link from last parent to new token.
-                self.set_parent_link(new_indent, ix);
-
                 ix
             },
 
-            // hobbit:
-            //     name:    Frodo
-            //     name:    Bilbo
-            Ordering::Equal => { 
-
-                let key = token.key().clone();
+            (Ordering::Equal, None) => {
 
                 // Append the new token to the keytree Vec.
                 let ix = self.data.append_token(token);
 
-                // Get the last sibling token.
-                let sib_ix = self.last_tokens.last(new_indent);
-
-                // If a same-name-sibling then set next link .
-                if self.data.0[sib_ix].key() == &key {
-                    self.data.0[sib_ix].set_next_link(ix);
-                };
-
-                // Add child link from last parent to new token.
+                // Set parent for every new token, other than those that have a previous sibling.
                 self.set_parent_link(new_indent, ix);
 
-                // Change last_tokens.
+                // Replace last
+                self.last_tokens.replace_last_token(new_indent, ix);
+
+                ix
+            },
+               
+            // Sibling
+            (Ordering::Equal, Some(previous_sib_ix)) => {
+
+                // Append the new token to the keytree Vec.
+                let ix = self.data.append_token(token);
+
+                // Set sibling link.
+                self.set_next_link(previous_sib_ix, ix);
+
+                // Replace last
                 self.last_tokens.replace_last_token(new_indent, ix);
 
                 ix
             },
 
-            // When the indent decreases, we need to remove parents like `hobbit`.
-            //     hobbit:
-            //         friends:
-            //              ..
-            //         name:    Frodo
-            //         name:    Bilbo
-            //     location:    Middle Earth
-            Ordering::Less => { 
+            (Ordering::Less, None) => {
 
                 // Append the new token to the keytree Vec.
                 let ix = self.data.append_token(token);
+
+                // Set parent for every new token, other than those that have a previous sibling.
+                self.set_parent_link(new_indent, ix);
 
                 // Remove deeper last_tokens.
                 self.last_tokens.remove_deeper_than(new_indent);
 
-                // Change last_token.
+                // Replace last
                 self.last_tokens.replace_last_token(new_indent, ix);
 
                 ix
             },
+
+            (Ordering::Less, Some(previous_sib_ix)) => {
+
+                // Append the new token to the keytree Vec.
+                let ix = self.data.append_token(token);
+
+                // Don't set parent link.
+
+                // Remove deeper last_tokens.
+                self.last_tokens.remove_deeper_than(new_indent);
+
+                // Replace last
+                self.last_tokens.replace_last_token(new_indent, ix);
+
+                ix
+            }
         };
         self.indent = new_indent;
         Ok(ix)
@@ -182,9 +231,9 @@ impl LastTokens{
 
     // Returns the last token at a given indent level. Returns None if there is no parent at that
     // level. 
-    pub(crate) fn last(&self, indent: usize) -> usize {
-        if indent >= self.0.len() { panic!("This is a bug") };
-        self.0[indent]
+    pub(crate) fn last(&self, indent: usize) -> Option<usize> {
+        if indent >= self.0.len() { return None }
+        Some(self.0[indent])
     }
     
     // Remove parents deeper than indent, for example if indent is 2 then retain indents parents
@@ -632,7 +681,7 @@ pub mod test {
     fn last_method_should_work() {
         let mut last = LastTokens::new();
         last.add(0, 0);
-        assert_eq!(last.last(0), 0);
+        assert_eq!(last.last(0), Some(0));
     }
 
     #[test]
@@ -649,7 +698,7 @@ pub mod test {
         let mut last = LastTokens::new();
         last.add(0, 0);
         last.replace_last_token(0, 1);
-        assert_eq!(last.last(0), 1);
+        assert_eq!(last.last(0), Some(1));
     }
 
     #[test]
@@ -670,5 +719,93 @@ pub mod test {
         last.replace_last_token(1, 3);
 
         assert_eq!(last.parent(1), 0);
+    }
+
+    #[test]
+    fn should_not_add_siblings_to_parent() {
+        let s = r"
+          page:
+              country:        Australia
+              series:
+                  data_type:  u
+                  series_id:  AUSURAMS
+              series:
+                  data_type:  u
+                  series_id:  AUSURANAA
+        ";
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.token(0).children(), vec![1, 2]);
+    }
+
+    #[test]
+    fn should_be_siblings() {
+        let s = r"
+          key:
+              sibling:      sibling1
+              sibling:      sibling2
+        ";
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.token(1).next(), Some(2));
+    }
+
+    // #[test]
+    // fn should_not_add_siblings_to_parent() {
+    //     let s = r"
+    //       page:
+    //           country:        Australia
+    //           data_type:      u
+    //           index:          0
+    //     
+    //           series:
+    //               data_type:  u
+    //               series_id:  AUSURAMS
+    //           series:
+    //               data_type:  u
+    //               series_id:  AUSURANAA
+    //     
+    //           graphic:
+    //               category:   collation
+    //               series_id:  AUSURAMS
+    //               series_id:  AUSURANAA
+    //     ";
+    //     let kt = Parser::parse_str(&s).unwrap().0;
+    //     assert_eq!(kt.token(0).children(), vec![1, 2, 3, 4, 10]);
+    // }
+
+    #[test]
+    fn previous_sib_should_work() {
+        // key
+        //     sibling: sibling1
+        let builder = Builder {
+            data: KeyTreeData(
+                vec![
+                    Token::Key {
+                        key: "key".to_owned(),
+                        children: Vec::new(),
+                        next: None,
+                        debug: TokenDebugInfo {line_num: 0},
+                    },
+                    Token::KeyValue {
+                        key: "sibling".to_owned(),
+                        value: "sibling1".to_owned(),
+                        next: None,
+                        debug: TokenDebugInfo {line_num: 1},
+                    },
+                ]
+            ),
+            last_tokens: LastTokens(vec!(0, 1)),
+            indent: 1
+        };
+        let new_token = Token::KeyValue {
+            key: "sibling".to_owned(),
+            value: "sibling2".to_owned(),
+            next: None,
+            debug: TokenDebugInfo {line_num: 2},
+        };
+        if let Some(ix) = builder.previous_sib_ix(1, &new_token) {
+            assert_eq!(ix, 1);
+        } else {
+            assert!(false)
+        }
     }
 }
