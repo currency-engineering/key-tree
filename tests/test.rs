@@ -1,37 +1,46 @@
-use indoc::indoc;
-use keytree::{KeyTree, KeyTreeRef};
-use anyhow::Error;
+use std::convert::TryInto;
+use key_tree::{KeyTree, KeyTreeError};
+
+static HOBBITS: &'static str = r"hobbit:
+    name:         Frodo Baggins
+    age:          60
+    friends:
+        hobbit:
+            name: Bilbo Baggins
+            age:  111
+        hobbit:
+            name: Samwise Gamgee
+            age:  38
+            nick: Sam";
 
 #[derive(Debug)]
-struct Plant {
-    genus: String
+struct Hobbit {
+    name: String,
+    age: u32,
+    friends: Vec<Hobbit>,
+    nick: Option<String>,
 }
 
-impl<'a> TryInto<Plant> for KeyTreeRef<'a> {
-    type Error = Error;
+impl<'a> TryInto<Hobbit> for KeyTree {
+    type Error = KeyTreeError;
 
-    fn try_into(self) -> Result<Plant, Self::Error> {
+    fn try_into(self) -> Result<Hobbit, Self::Error> {
         Ok(
-            Plant {
-                species: self.from_str("plant::species")?,
+            Hobbit {
+                name:       self.from_str("hobbit::name")?,
+                age:        self.from_str("hobbit::age")?,
+                friends:    self.opt_vec_at("hobbit::friends::hobbit")?,
+                nick:       self.opt_from_str("hobbit::nick")?,
             }
         )
     }
 }
 
 #[test]
-fn test_first() {
-    let s = indoc!("
-        plant:
-            species:
-    ");
-
-    let kt = KeyTree::parse(s, None).unwrap();
-
-    let err: Result<Plant, Error> = kt.to_ref().try_into();
-
-    assert_eq!(err.unwrap_err().to_string(), "Expected keyvalue, found key 'species' on line 2");
-
-
+fn try_into_should_work() {
+    let hobbit: Hobbit = KeyTree::parse_str(HOBBITS)
+        .unwrap()
+        .try_into()
+        .unwrap();
 }
 

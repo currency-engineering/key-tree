@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
-use anyhow::{anyhow, Error, Result};
-use crate::{builder::{Parents, SameNameSibs}, KeyTree, Token};
-use std::path::{Path, PathBuf};
+use crate::{DebugInfo, KeyTreeData, KeyTreeError, Result, Token, TokenDebugInfo};
+use std::{fs, path::{Path, PathBuf}};
+use std::{cmp::Ordering};
 
-const INDENT_STEP: usize = 4;
+pub(crate) const INDENT_STEP: usize = 4;
 
 // Parser state. Used in parser() function.
 #[derive(Clone, Debug, PartialEq)]
@@ -19,32 +19,16 @@ enum PS {
     Cm,       // In comment
 }
 
-pub struct BadIndent(usize);
-
-impl BadIndent {
-    // Maps InnerBadIndent to Error.
-    #[allow(unused_variables)]
-    fn from_inner(
-        self,
-        token: &Token,
-        line: usize) -> Error
-    {
-        anyhow!(format!("Bad indent of {} at line {}.", self.0, line))
-    }
-}
-
 // Chars received
 enum Punct  {
     Char, 
     Colon,
     ForwardSlash,
-    Newline,
     Whitespace,
 }
 
 impl Punct {
     fn from_char(c: char) -> Self {
-        if c == '\n' { return Punct::Newline };
         if c.is_whitespace() { return Punct::Whitespace };
         match c {
             ':' => Punct::Colon,
@@ -54,466 +38,442 @@ impl Punct {
     }
 }
 
-#[derive(Debug)]
-pub (crate) struct Builder<'a> {
-    s:              &'a str,
-    tokens:         Vec<Token<'a>>,
+// === Builder ====================================================================================
 
-    // Every token at indent n has a parent at indent 0 to n - 1. This parent
-    parents:    Parents,
-    snsibs:     SameNameSibs,
-    filename:   Option<PathBuf>
+// Holds on to some extra start while we are building a KeyTree.
+pub (crate) struct Builder {
+    pub(crate) data: KeyTreeData,
+    last_tokens: LastTokens,
+    indent: usize, 
 }
 
-impl<'a> Builder<'a> {
-    fn from_str(s: &'a str, filename: Option<&Path>) -> Self {
+impl Builder {
+    pub(crate) fn new() -> Builder {
         Builder {
-            s,
-            tokens:     Vec::new(),
-            parents:    Parents::new(),
-            snsibs:     SameNameSibs::new(),
-            filename:   filename.map(|path| path.to_path_buf()),
+            data: KeyTreeData::new(),
+            last_tokens: LastTokens::new(),
+            indent: 0,
         }
     }
 
-    fn is_empty(&self) -> bool { self.tokens.is_empty() }
+    pub(crate) fn owned_keytree(self) -> KeyTreeData {
+        self.data
+    }
 
-    fn token(&self, ix: usize) -> &Token<'a> { &self.tokens[ix] }
-
-    // Returns the next() value of ixth token.
-    fn next(&self, ix: usize) -> Option<usize> { self.token(ix).next() }
-
-    // Move out of Builder into Core.
-    fn to_core(self) -> KeyTree<'a> {
-        KeyTree {
-            tokens: self.tokens,
-            filename: self.filename,
+    pub(crate) fn append(&mut self, indent: usize, token: Token) -> Result<usize> {
+        if self.data.is_empty() {
+            self.append_first_token(indent, token)
+        } else {
+            self.append_non_first_token(indent, token)
         }
     }
 
-    // Each token at indent n, except the root token, has parents at each
-    // indent level from 0 to n-1. To build up links from parents to children
-    // we keep track of current parents. This is akin to thinking about which 
-    // parents are 'in scope'. We look at each 
-
-    fn append(&mut self, indent: usize, token: Token<'a>) -> Result<()> {
-
-        match (token, self.is_empty()) {
-
-            (token @ Token::KeyValue {..}, true) => {
-                Err(anyhow!(format!("First token {} must be key.", &token)))
+    // Should only be called by append();
+    pub(crate) fn append_first_token(&mut self, indent: usize, token: Token) -> Result<usize> {
+        match token {
+            token @ Token::KeyValue {..} => {
+                return Err(KeyTreeError::Parse(
+                    "Expected key found".to_string(),
+                    token.to_string(),
+                    1,
+                ))
             },
-
-            (token @ Token::Key {..}, true) => {
-                self.tokens.push(token);
-                self.snsibs.push(0);
-                self.parents.push(0);
-                Ok(())
-            },
-
-            (token, false) => {
-
-                // Possibility A. is that the lastest token (name:) increases
-                // the indent level by 1.
-                //
-                //  hobbit:
-                //     name:   Frodo
-                
-                // Possibility B is that the lastest token (name:) has the same
-                // key name and the same indent level as the previous token.
-                //
-                // hobbit:
-                //     name:    Frodo
-                //     name:    Bilbo
-                
-                // Possibility C is that the latest token (location:) has
-                // reduced the indent level.
-                //
-                // scenario:
-                //     hobbit:
-                //         friends:
-                //              ..
-                //         name:    Frodo
-                //         name:    Bilbo
-                //     location:    Middle Earth
-
-                // Remove out-of-scope parents. For example in example 3. we
-                // want to remove 'friends:' key as it is no longer in scope.
-                self.parents.truncate(indent);
-
-                // Get parent index.
-                if indent == 0 {
-                    return Err(anyhow!(
-                        format!("Non-root token {} cannot have zero indent at line {}.", &token, token.line())
-                    ))
-                };
-
-                let parent_ix = match self.parents.parent(indent - 1) {
-                    Some(ix) => ix,
-                    None => return Err(anyhow!(format!("Unexpected indent at line {}.", token.line()))),
-                };
-
-                // Get the index of the new token, when the token is actually
-                // pushed to self.tokens.
-                let child_ix = self.tokens.len();
-        
-                // Append the child of the parent.
-                self.tokens[parent_ix].set_child(token.key(), child_ix);
-
-                // If token is a Token::Key then token to parents list.
-                if let Token::Key {..} = token {
-                    self.parents.push(child_ix);
-                }
-
-                // Remove out-of-scope same-name-siblings. For example 'name:'
-                // in example 3.
-                self.snsibs.truncate(indent + 1);
-
-                // Non-contiguous same-name-siblings will never be found,
-                // because keys are discovered by iterating through children
-                // Vec in Token, so any repeats will not be found.
-                //
-                // If a same-name-sibling exists then add next() to it. 
-                if let Some(snsib_ix) = self.snsibs.sibling(indent) {
-                    if self.tokens[snsib_ix].key() == token.key() {
-                        self.tokens[snsib_ix].set_next(child_ix);
-                    };
-                };
-
-                // Append token to same-name-siblings list.
-                self.snsibs.truncate(indent);
-                self.snsibs.push(child_ix);
-
-                // Insert token into Builder.
-                self.tokens.push(token);
-
-                Ok(())
+            token @ Token::Key {..} => {
+                let ix = 0;
+                self.data.append_token(token);
+                self.last_tokens.add(indent, ix);
             },
         }
+        self.indent = indent;
+        Ok(0)
+    }
+
+    fn set_parent_link(&mut self, indent: usize, child_ix: usize) {
+        let parent_ix = self.last_tokens.parent(indent);
+        self.data.0[parent_ix].set_link_to_child(child_ix);
+    }
+
+    // This is the main function that builds a KeyTreeData. Should only be called by append();
+    fn append_non_first_token(&mut self, new_indent: usize, token: Token) -> Result<usize> {
+
+        let ix = match usize::cmp(&new_indent, &self.indent) {
+
+            // When the indent increases, we need to add a the token as a child.
+            //  hobbit:
+            //     name:   Frodo
+            Ordering::Greater => {
+
+                // Append the new token to the keytree Vec.
+                let ix = self.data.append_token(token);
+
+                // Append the new token to last.
+                self.last_tokens.add(new_indent, ix);
+
+                // Add child link from last parent to new token.
+                self.set_parent_link(new_indent, ix);
+
+                ix
+            },
+
+            // hobbit:
+            //     name:    Frodo
+            //     name:    Bilbo
+            Ordering::Equal => { 
+
+                let key = token.key().clone();
+
+                // Append the new token to the keytree Vec.
+                let ix = self.data.append_token(token);
+
+                // Get the last sibling token.
+                let sib_ix = self.last_tokens.last(new_indent);
+
+                // If a same-name-sibling then set next link .
+                if self.data.0[sib_ix].key() == &key {
+                    self.data.0[sib_ix].set_next_link(ix);
+                };
+
+                // Add child link from last parent to new token.
+                self.set_parent_link(new_indent, ix);
+
+                // Change last_tokens.
+                self.last_tokens.replace_last_token(new_indent, ix);
+
+                ix
+            },
+
+            // When the indent decreases, we need to remove parents like `hobbit`.
+            //     hobbit:
+            //         friends:
+            //              ..
+            //         name:    Frodo
+            //         name:    Bilbo
+            //     location:    Middle Earth
+            Ordering::Less => { 
+
+                // Append the new token to the keytree Vec.
+                let ix = self.data.append_token(token);
+
+                // Remove deeper last_tokens.
+                self.last_tokens.remove_deeper_than(new_indent);
+
+                // Change last_token.
+                self.last_tokens.replace_last_token(new_indent, ix);
+
+                ix
+            },
+        };
+        self.indent = new_indent;
+        Ok(ix)
+    }
+}
+
+// === LastTokens =================================================================================
+
+// Keeps track of the last token at each indent level from 0 to current indent level. These parents
+// can be thought of as 'in scope'.
+#[derive(Debug)]
+pub(crate) struct LastTokens(pub Vec<usize>);
+
+impl LastTokens{
+    pub(crate) fn new() -> Self {
+        LastTokens(Vec::new())
+    }
+
+    // Returns the last token at a given indent level. Returns None if there is no parent at that
+    // level. 
+    pub(crate) fn last(&self, indent: usize) -> usize {
+        if indent >= self.0.len() { panic!("This is a bug") };
+        self.0[indent]
+    }
+    
+    // Remove parents deeper than indent, for example if indent is 2 then retain indents parents
+    // with indents 0 and 1 and 2.
+    pub(crate) fn remove_deeper_than(&mut self, indent: usize) {
+        self.0.truncate(indent + 1)
+    }
+
+    // Replace last token. Will panic if there is an indent mismatch.
+    pub(crate) fn replace_last_token(&mut self, indent: usize, ix: usize) {
+        assert!(indent + 1 == self.0.len());
+        self.0[indent] = ix;
+
+    }
+
+    // Add another token to list. Will panic if there is an indent mismatch.
+    pub(crate) fn add(&mut self, indent: usize, ix: usize) {
+        assert!(indent == self.0.len());
+        self.0.push(ix);
+    }
+
+    // Return the parent index based on indent level.
+    pub(crate) fn parent(&self, indent: usize) -> usize {
+        if indent == 0 { panic!("This is a bug") };
+        if indent > self.0.len() { panic!("this is a bug") };
+
+        self.0[indent - 1]
+    }
+}
+
+
+pub(crate) struct Parser;
+
+impl Parser {
+
+    pub fn parse_str(s: &str) -> Result<(KeyTreeData, DebugInfo)> {
+        let path: Option<&Path> = None;
+        Self::parse_inner(s, path)
+    }
+
+    pub fn parse<P: AsRef<Path>>(path: P) -> Result<(KeyTreeData, DebugInfo)> {
+        let path: PathBuf = path.as_ref().to_path_buf();
+
+        let path_string = path.to_str()
+            .ok_or(KeyTreeError::IO(String::new()))?.to_string();
+
+        let s = fs::read_to_string(&path).map_err(|_| KeyTreeError::IO(path_string))?;
+
+        Self::parse_inner(&s, Some(&path))
     }
 
     // Parse a string into a `KeyTree`. If there is a filename, this can be input for error
     // handling. 
-    pub fn parse(s: &'a str, f: Option<&Path>) -> Result<KeyTree<'a>> {
+    pub fn parse_inner(s: &str, path_opt: Option<&Path>) -> Result<(KeyTreeData, DebugInfo)> {
+        let debug_info = DebugInfo::new(path_opt);
 
-        if s.is_empty() { return Err(anyhow!("Empty string.")) };
+        if s.is_empty() { return Err(KeyTreeError::ParseEmpty) };
+        let lines = s.lines();
 
-        let mut parse_state: PS = PS::Fc;
+        // These variables are used by the parser to build tokens.
+        let mut parse_state: PS;
 
-        let mut line            = 0;
-        let mut line_start      = 0;
-        let mut start_key       = 0;
-        let mut end_key         = 0;
-        let mut start_val       = 0;
-        // let mut end_val;
+        // Because of comments, lines do not correlate with items in the KeyTree Vec.  
+        let mut line_num;
+
+        let mut start_key;
+        let mut end_key;
+        let mut start_val;
         let mut root_indent     = None;
 
-        let mut core_builder: Builder = Builder::from_str(s, f);
+        // Keeps track of last pos when parsing line.
+        let mut last_pos;
 
-        for (pos, ch) in core_builder.s.char_indices() {
+        // Tokens are passed to the Builder
+        let mut builder = Builder::new();
 
-            match (&parse_state, Punct::from_char(ch)) {
+        for (i, line) in lines.enumerate() {
+            line_num = i + 1;
 
-                // Matches are ordered by estimated rate of occurence.
+            parse_state = PS::Fc;
+            start_key = 0;
+            end_key = 0;
+            start_val = 0;
+            last_pos = 0;
 
-                // Whitespace, no errors.
+            for (pos, ch) in line.char_indices() {
 
-                (PS::Fc, Punct::Whitespace) => {
-                    line_start = pos;
-                    parse_state = PS::Bk;
-                },
-                (PS::Bk, Punct::Whitespace) => { },
-                (PS::Cm, Punct::Whitespace) => { },
-                (PS::Rak, Punct::Whitespace) => {
-                    parse_state = PS::Ak;
-                },
-                (PS::Ak, Punct::Whitespace) => { },
-                (PS::Iv, Punct::Whitespace) => { },
+                last_pos = pos;
 
-                // Char, no errors.
+                match (&parse_state, Punct::from_char(ch)) {
 
-                (PS::Ak, Punct::Char) => {
-                    start_val = pos;
-                    parse_state = PS::Iv;
-                },
-                (PS::Iv, Punct::Char) => {},
-                (PS::Fc, Punct::Newline) => {
-                    line += 1;
-                    parse_state = PS::Fc;
-                },
-                (PS::Fc, Punct::Char) => {
-                    line_start = pos;
-                    start_key = pos;
-                    parse_state = PS::Ik;
-                },
-                (PS::Bk, Punct::Char) => {
-                    start_key = pos;
-                    parse_state = PS::Ik;
-                },
-                (PS::Cok, Punct::Char) => {
-                    parse_state = PS::Ik;
-                },
-                (PS::Cm, Punct::Char) => { },
-                (PS::Ik, Punct::Char) => {}
+                    // Matches are ordered by estimated rate of occurence.
+
+                    // Whitespace, no errors.
+
+                    (PS::Fc, Punct::Whitespace) => {
+                        parse_state = PS::Bk;
+                    },
+                    (PS::Bk, Punct::Whitespace) => { },
+                    (PS::Cm, Punct::Whitespace) => { },
+                    (PS::Rak, Punct::Whitespace) => {
+                        parse_state = PS::Ak;
+                    },
+                    (PS::Ak, Punct::Whitespace) => { },
+                    (PS::Iv, Punct::Whitespace) => { },
+
+                    // Char, no errors.
+
+                    (PS::Ak, Punct::Char) => {
+                        start_val = pos;
+                        parse_state = PS::Iv;
+                    },
+                    (PS::Iv, Punct::Char) => {},
+                    (PS::Fc, Punct::Char) => {
+                        start_key = pos;
+                        parse_state = PS::Ik;
+                    },
+                    (PS::Bk, Punct::Char) => {
+                        start_key = pos;
+                        parse_state = PS::Ik;
+                    },
+                    (PS::Cok, Punct::Char) => {
+                        parse_state = PS::Ik;
+                    },
+                    (PS::Cm, Punct::Char) => { },
+                    (PS::Ik, Punct::Char) => {}
+
+                    // Colon, no errors
+
+                    (PS::Cok, Punct::Colon) => {
+                        parse_state = PS::Ik;
+                    },
+                    (PS::Cm, Punct::Colon) => { },
+                    (PS::Iv, Punct::Colon) => {},
+                    (PS::Ak, Punct::Colon) => {
+                        start_val = pos;
+                        parse_state = PS::Iv;
+                    },
+                    (PS::Ik, Punct::Colon) => {
+                        end_key = pos - 1;
+                        parse_state = PS::Rak;
+                    }
+
+                    // Forward slash, no errors
+
+                    (PS::Cok, Punct::ForwardSlash) => {
+                        parse_state = PS::Cm;
+                    },
+                    (PS::Fc, Punct::ForwardSlash) => {
+                        start_key = pos;
+                        parse_state = PS::Cok;
+                    },
+                    (PS::Cm, Punct::ForwardSlash) => {},
+                    (PS::Bk, Punct::ForwardSlash) => {
+                        start_key = pos;
+                        parse_state = PS::Cok;
+                    },
+                    (PS::Ik, Punct::ForwardSlash) => {}
+                    (PS::Ak, Punct::ForwardSlash) => {
+                        start_val = pos;
+                        parse_state = PS::Iv;
+                    },
+                    (PS::Iv, Punct::ForwardSlash) => {},
+
+                    // Whitespace errors
+
+                    (PS::Ik, Punct::Whitespace) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("No colon after key", token_str, line_num)
+                    },
+                    (PS::Cok, Punct::Whitespace) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("Incomplete comment or key", token_str, line_num)
+                    },
+
+                    // Char errors
+
+                    (PS::Rak, Punct::Char) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("No space after key", token_str, line_num)
+                    },
+
+                    // Colon, errors
+
+                    (PS::Fc, Punct::Colon) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("Colon before key", token_str, line_num)
+                    },
+                    (PS::Bk, Punct::Colon) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("Colon before key", token_str, line_num)
+                    },
+                    (PS::Rak, Punct::Colon) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("No space after key", token_str, line_num)
+                    },
+
+                    // Forward slash errors
+
+                    (PS::Rak, Punct::ForwardSlash) => {
+                        let token_str = &s[start_key..=pos - 1];
+                        return parse_err("No space after key", token_str, line_num)
+                    },
+                };  // end match
+
+
+            }
+
+            match parse_state {
 
                 // Newline, no errors
 
-                (PS::Bk, Punct::Newline) => {
-                    line += 1;
-                    parse_state = PS::Fc;
-                },
-                (PS::Cm, Punct::Newline) => {
-                    line += 1;
-                    parse_state = PS::Fc;
-                },
-
-                (PS::Rak, Punct::Newline) => {
-                    line += 1;
+                PS::Fc => {},
+                PS::Bk => {},
+                PS::Cm => {},
+                PS::Rak => {
                     let token = Token::Key {
-                        key:        &s[start_key..=end_key],
+                        key:        line[start_key..=end_key].into(),
                         children:   Vec::new(),
                         next:       None,
-                        line,
+                        debug:      TokenDebugInfo {line_num},
                     };
                     let indent = indent(
                         &mut root_indent,
-                        line_start,
                         start_key
-                    ).map_err(|err| err.from_inner(&token, line))?;
-                    core_builder.append(indent, token)?;
-                    parse_state = PS::Fc;
+                    ).map_err(|err| err.into_bad_indent(line_num))?;
+                    builder.append(indent, token)?;
                 },
-
-                (PS::Ak, Punct::Newline) => {
-                    line += 1;
+                PS::Ak => {
                     let token = Token::Key {
-                        key:        &s[start_key..=end_key],
+                        key:        line[start_key..=end_key].into(),
                         children:   Vec::new(),
                         next:       None,
-                        line,
+                        debug:      TokenDebugInfo {line_num},
                     };
                     let indent = indent(    
                         &mut root_indent,
-                        line_start,
                         start_key
-                    ).map_err(|e| e.from_inner(&token, line))?;
-                    core_builder.append(indent, token)?;
-                    parse_state = PS::Fc;
+                    ).map_err(|err| err.into_bad_indent(line_num))?;
+                    builder.append(indent, token)?;
                 },
-                (PS::Iv, Punct::Newline) => {
-                    line += 1;
+                PS::Iv => {
                     let token = Token::KeyValue {
-                        key:    &s[start_key..=end_key],
-                        value:  &s[start_val..=pos - 1],
+                        key:    line[start_key..=end_key].into(),
+                        value:  line[start_val..=last_pos].into(),
                         next:   None,
-                        line,
+                        debug:  TokenDebugInfo {line_num},
                     };
                     let indent = indent(
                         &mut root_indent,
-                        line_start,
                         start_key
-                    ).map_err(|e| e.from_inner(&token, line))?;
+                    ).map_err(|err| err.into_bad_indent(line_num))?;
 
-                    core_builder.append(indent, token)?;
-                    parse_state = PS::Fc;
-                },
-
-                // Colon, no errors
-
-                (PS::Cok, Punct::Colon) => {
-                    parse_state = PS::Ik;
-                },
-                (PS::Cm, Punct::Colon) => { },
-                (PS::Iv, Punct::Colon) => {},
-                (PS::Ak, Punct::Colon) => {
-                    start_val = pos;
-                    parse_state = PS::Iv;
-                },
-                (PS::Ik, Punct::Colon) => {
-                    end_key = pos - 1;
-                    parse_state = PS::Rak;
-                }
-
-                // Forward slash, no errors
-
-
-                (PS::Cok, Punct::ForwardSlash) => {
-                    parse_state = PS::Cm;
-                },
-                (PS::Fc, Punct::ForwardSlash) => {
-                    line_start = pos;
-                    start_key = pos;
-                    parse_state = PS::Cok;
-                },
-                (PS::Cm, Punct::ForwardSlash) => {},
-                (PS::Bk, Punct::ForwardSlash) => {
-                    start_key = pos;
-                    parse_state = PS::Cok;
-                },
-                (PS::Ik, Punct::ForwardSlash) => {}
-                (PS::Ak, Punct::ForwardSlash) => {
-                    start_val = pos;
-                    parse_state = PS::Iv;
-                },
-                (PS::Iv, Punct::ForwardSlash) => {},
-
-                // Whitespace errors
-
-                (PS::Ik, Punct::Whitespace) => {
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        anyhow!(format!("No colon after key {} at line {}.", &token_str, line + 1))
-                    )
-                },
-                (PS::Cok, Punct::Whitespace) => {
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        anyhow!(format!("Incomplete comment of key {} at {}.", &token_str, line + 1))
-                    )
-                },
-
-                // Char errors
-
-                (PS::Rak, Punct::Char) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(
-                        anyhow!(format!("No space after key {} at line {}.", &token_str, line))
-                    )
+                    builder.append(indent, token)?;
                 },
 
                 // Newline errors
 
-                (PS::Cok, Punct::Newline) => {
-                    line += 1;
-                    return Err(
-                        anyhow!(format!("Incomplete line {} at {}.", &String::from("/"), line))
-                    )
+                PS::Cok => {
+                    return parse_err("Incomplete line", "/", line_num)
                 },
-                (PS::Ik, Punct::Newline) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(anyhow!(format!("Incomplete line {} at {}.", &token_str, line)))
+                PS::Ik => {
+                    let token_str = &line[start_key..=last_pos - 1];
+                    return parse_err("Incomplete line", token_str, line_num)
                 },
-
-                // Colon, errors
-
-                (PS::Fc, Punct::Colon) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(anyhow!(format!("Colon before key {} at {}.", &token_str, line)))
-                },
-                (PS::Bk, Punct::Colon) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(anyhow!(format!("Colon before key {} at {}.", &token_str, line)))
-                },
-                (PS::Rak, Punct::Colon) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(anyhow!(format!("No space after key {} at {}.", &token_str, line)))
-                },
-
-                // Forward slash errors
-
-                (PS::Rak, Punct::ForwardSlash) => {
-                    line += 1;
-                    let token_str = &s[start_key..=pos - 1];
-                    return Err(anyhow!(format!("No space after key {} at line {}.", &token_str, line)))
-                },
-            };  // end match
-            
+            };
         };
-
-        // Handle strings that don't end in '\n".
-
-        match parse_state {
-            PS::Fc => {},
-            PS::Bk => {},
-            PS::Cok => {
-                let token_str = &s[start_key..];
-                return Err(anyhow!(format!("Incomplete comment or key {} at line {}.", &token_str, line)))
-            },
-            PS::Ik => { 
-                line += 1;
-                let token_str = &s[start_key..];
-                return Err(anyhow!(format!("Incomplete line {} at {}.", &token_str, line)))
-            },
-            PS::Rak => {
-                line += 1;
-                let token = Token::Key {
-                    key: &s[start_key..s.chars().count() - 1],
-                    children: Vec::new(),
-                    next: None,
-                    line,
-                };
-                let indent = indent(
-                    &mut root_indent,
-                    line_start,
-                    start_key
-                ).map_err(|e| e.from_inner(&token, line))?;
-                core_builder.append(indent, token)?;
-            },
-            PS::Ak => {
-                line += 1;
-                let token = Token::Key {
-                    key:        &s[start_key..],
-                    children:   Vec::new(),
-                    next:       None,
-                    line,
-                };
-                let indent = indent(
-                    &mut root_indent,
-                    line_start,
-                    start_key
-                ).map_err(|e| e.from_inner(&token, line))?;
-                core_builder.append(indent, token)?;
-            },
-            PS::Iv => {
-                line += 1;
-                let token = Token::KeyValue {
-                    key: &s[start_key..=end_key],
-                    value: &s[start_val..],
-                    next: None,
-                    line,
-                };
-                let indent = indent(
-                    &mut root_indent,
-                    line_start,
-                    start_key
-                ).map_err(|e| e.from_inner(&token, line))?;
-                core_builder.append(indent, token)?;
-            },
-            PS::Cm => {},
-        };
-
-        match core_builder.is_empty() {
-            true => Err(anyhow!("No tokens")),
-            false => Ok(core_builder.to_core()),
+        match builder.data.is_empty() {
+            true => Err(KeyTreeError::ParseNoTokens),
+            false => Ok((builder.owned_keytree(), debug_info)),
         }
     }
 }
 
 // Returns indent as 0, 1, 2 from token data.
-fn indent(
-    root_indent:    &mut Option<usize>,
-    line_start:     usize,
-    start_key:      usize) -> std::result::Result<usize, BadIndent>
-{
-    match root_indent {
+// If the root indent is not set, return 0.
+fn indent(root_indent: &mut Option<usize>, start_key: usize) -> Result<usize> {
 
+    match root_indent {
         // root_indent has not been set.
         None => {
-            *root_indent = Some(start_key - line_start);
+            *root_indent = Some(start_key);
             Ok(0)
         },
         Some(root_indent) => {
-            let chars_indent = start_key -
-                line_start -
-                *root_indent;
+            let chars_indent = start_key - *root_indent;
 
             if chars_indent % INDENT_STEP != 0 {
-                Err(BadIndent(chars_indent))
+                Err(KeyTreeError::BadIndentTemp(chars_indent))
             } else {
                 Ok(chars_indent / INDENT_STEP)
             }
@@ -521,3 +481,194 @@ fn indent(
     }
 }
 
+fn parse_err<T>(msg: &str, token: &str, line: usize) -> Result<T> {
+    Err(KeyTreeError::Parse(msg.to_string(), token.to_string(), line))
+}
+
+#[cfg(test)]
+pub mod test {
+
+    use super::*;
+    use indoc::indoc;
+    use crate::{KeyTreeData, TokenDebugInfo};
+    use crate::KeyTreeError::BadIndent;
+    
+    // === indent =================================================================================
+    // Complete
+    
+    #[test]
+    fn indent_should_fail_if_key_misaligned() {
+        if let Err(e) = indent(&mut Some(0), 3) {
+            assert_eq!(e, KeyTreeError::BadIndentTemp(3));
+            assert_eq!(e.to_string(), "Bad indent of 3");
+        } else { assert!(false) }
+    }
+
+    #[test]
+    fn indent_should_work() {
+        assert_eq!(indent(&mut Some(0), 4).unwrap(), 1);
+        assert_eq!(indent(&mut None, 4).unwrap(), 0);
+        assert_eq!(indent(&mut Some(0), 8).unwrap(), 2);
+
+        assert_eq!(indent(&mut Some(3), 7).unwrap(), 1);
+        assert_eq!(indent(&mut Some(3), 11).unwrap(), 2);
+    }
+
+    // === Parser =================================================================================
+
+    #[test]
+    fn one_line_key_should_parse() {
+        let s = "key:".to_string();
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.0[0].key(), "key"); 
+    }
+
+    #[test]
+    fn two_line_should_parse() {
+        let s = indoc!("
+            key1:
+                key2:");
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.token(0).key(), "key1"); 
+        assert_eq!(kt.token(1).key(), "key2");
+    }
+
+    #[test]
+    fn bad_indent_should_fail() {
+        let s = indoc!("
+            key:
+               key:");
+        if let Err(e) = Parser::parse_str(&s) {
+           assert_eq!(e, BadIndent(3,2));
+        } else { assert!(false) };
+    }
+
+    #[test]
+    fn child_should_be_set() {
+        let s = indoc!("
+            key1:
+                key2:");
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.token(0).children()[0], 1);
+    }
+
+    #[test]
+    fn next_sibling_should_be_set() {
+        let s = indoc!("
+            key1:
+                keyval: a
+                keyval: b");
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.token(1).next(), Some(2));
+    }
+
+    // === Builder tests ========================================================================== 
+    // Probably complete
+    
+    fn new_builder() -> Builder {
+        let data = KeyTreeData(Vec::new());
+        Builder {
+            data,
+            last_tokens: LastTokens::new(),
+            indent: 0,
+        }
+    }
+
+    fn token_debug_info() -> TokenDebugInfo {
+        TokenDebugInfo {line_num: 0}
+    }
+
+    fn key_token() -> Token {
+        Token::Key {
+            key: "key".to_owned(),
+            children: Vec::new(),
+            next: None,
+            debug: token_debug_info(),
+        }
+    }
+
+    fn keyval_token() -> Token {
+        Token::KeyValue {
+            key: "key".to_owned(),
+            value: "value".to_owned(),
+            next: None,
+            debug: token_debug_info(),
+        }
+    }
+
+    #[test]
+    fn append_method_should_work() {
+        let mut builder = new_builder();
+        builder.append(0, key_token()).unwrap();
+        assert_eq!(builder.data.0[0], key_token());
+    }
+
+    #[test]
+    fn append_first_token_should_fail_on_keyvalue() {
+        if let Err(err) = new_builder().append_first_token(0, keyval_token()) {
+            assert_eq!(err.to_string(), "Expected key found [key: value] on line 1")
+        } else { assert!(false) }
+    }
+
+    #[test]
+    fn append_first_token_should_work() {
+        if let Ok(_) = new_builder().append_first_token(0, key_token()) {
+            assert!(true)
+        } else { assert!(false) }
+    }
+
+    #[test]
+    fn set_parent_link_should_work() {
+        let mut builder = new_builder();
+        let old_ix = builder.append_first_token(0, key_token()).unwrap();
+        builder.append(1, key_token()).unwrap();
+        assert!(builder.data.token(old_ix).children()[0] == 1)
+    }
+
+    // === LastTokens tests =======================================================================
+    // Complete
+    
+    #[test] 
+    fn last_method_should_work() {
+        let mut last = LastTokens::new();
+        last.add(0, 0);
+        assert_eq!(last.last(0), 0);
+    }
+
+    #[test]
+    fn remove_deeper_than_method_should_work() {
+        let mut last = LastTokens::new();
+        last.add(0, 0);
+        last.add(1, 1);
+        last.remove_deeper_than(0);
+        assert_eq!(last.0.len(), 1);
+    }
+
+    #[test]
+    fn replace_last_token_method_should_work() {
+        let mut last = LastTokens::new();
+        last.add(0, 0);
+        last.replace_last_token(0, 1);
+        assert_eq!(last.last(0), 1);
+    }
+
+    #[test]
+    fn parent_method_should_work() {
+
+        //  parent:
+        //      child1:
+        //          grandchild:
+        //      child2:
+
+        let mut last = LastTokens::new();
+        last.add(0, 0);
+        last.add(1, 1);
+        last.add(2, 2);
+
+        last.remove_deeper_than(1);
+        assert_eq!(last.0.len(), 2);
+        last.replace_last_token(1, 3);
+
+        assert_eq!(last.parent(1), 0);
+    }
+}

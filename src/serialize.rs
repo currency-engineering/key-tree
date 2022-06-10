@@ -1,5 +1,3 @@
-//! Module to serialize a Rust data-structure into a nicely-formatted keytree string.
-
 use core::fmt::{self, Display};
 
 pub trait IntoKeyTree {

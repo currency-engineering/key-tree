@@ -1,5 +1,5 @@
 [package]
-name = "keytree"
+name = "key-tree"
 version = "0.1.0"
 authors = ["Eric Findlay <e.findlay@protonmail.ch>"]
 edition = "2021"
@@ -7,13 +7,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = { version = "1.0", default-features = false }
-
-[workspace]
-members = [ "examples/hobbit" ]
-
-[lib]
-doctest = false
+thiserror = "1.0.31"
+# keytree_derive = { path = "keytree_derive" }
 
 [dev-dependencies]
-indoc = "1"
+indoc = "1.0.6"
