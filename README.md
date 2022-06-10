@@ -34,10 +34,10 @@ Then we need to implement `TryInto<Hobbit>` to deserialize the string into a Rus
 data-structure,
 
 ```
-impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
-    type Error = Error;
+impl TryInto<Hobbit> for KeyTree {
+    type Error = KeyTreeError;
 
-    fn try_into(self) -> Result<Hobbit, Error> {
+    fn try_into(self) -> Result<Hobbit, Self::Error> {
         Ok(
             Hobbit {
 
@@ -86,11 +86,10 @@ The deserializing function should look something like
 
 ``` 
     // Creates an 'abstract syntax tree' which is just a set of references into the keytree string s.
-    let kt = KeyTree::parse(s).unwrap();
-
-    // kt.to_ref() creates a reference to kt.
-    // try_into() does all the deserialization work.
-    let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
+    let hobbit: Hobbit = KeyTree::parse(s)
+        .unwrap()
+        .try_into()
+        .unwrap();
     &dbg!(&hobbit);
 
 ```

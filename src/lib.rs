@@ -1,155 +1,68 @@
-//! # KeyTree
-//! 
-//! `KeyTree` is a text format designed to convert human readable information into Rust
-//! data-structures.
-//!
-//! # Mini-Tutorial
-//! 
-//! Lets say we have a struct like
-//! ```
-//! struct Hobbit {
-//!     name: String,
-//!     age: u32,
-//!     friends: Vec<Hobbit>,
-//!     nick: Option<String>,
-//! }
-//! ```
-//! and we want to record in a file how to create an instance of this struct. So we create a string
-//! like
-//! ```text
-//! hobbit:
-//!     name:         Frodo Baggins
-//!     age:          60
-//!     friends:
-//!         hobbit:
-//!             name: Bilbo Baggins
-//!             age:  111
-//!         hobbit:
-//!             name: Samwise Gamgee
-//!             age:  38
-//!             nick: Sam
-//! ```
-//!
-//! Then we need to implement `TryInto<Hobbit>` to deserialize the string into a Rust
-//! data-structure,
-//!
-//! ```
-//! impl<'a> TryInto<Hobbit> for KeyTreeRef<'a> {
-//!     type Error = Error;
-//! 
-//!     fn try_into(self) -> Result<Hobbit, Error> {
-//!         Ok(
-//!             Hobbit {
-//!
-//!                 // use the `from_str` implementation of `String` to get a `name`.
-//!                 name: self.from_str("hobbit::name")?,
-//!
-//!                 // use the `from_str` implementation `u32` to get an `age`.
-//!                 age: self.from_str("hobbit::age")?,
-//!
-//!                 // use the `TryInto<Hobbit> implementation to get a `Vec<Hobbit>`.
-//!                 friends: self.opt_vec_at("hobbit::friends::hobbit")?,
-//!
-//!                 // uses the `from_str` implementation for `String` to get an `Option<String>`.
-//!                 // If the keypath does not exist it returns `None`.
-//!                 nick: self.opt_from_str("hobbit::nick")?,
-//!             }
-//!         )
-//!     }
-//! }
-//! ```
-//!
-//! Functions that make a selection from the keytree string and deserialize it are
-//! ```
-//! self.at("abc::def::ghi")?
-//! ```
-//! ```
-//! self.opt_at("abc::def::ghi")?
-//! ```
-//! ```
-//! self.vec_at("abc::def::ghi")?
-//! ```
-//! ```
-//! self.opt_vec_at("abc::def::ghi")?
-//! ```
-//! ```
-//! self.from_str("abc::def::ghi")?
-//! ```
-//! ```
-//! self.opt_from_str("abc::def::ghi")?
-//! ```
-//! ```
-//! self.opt_vec_from_str("abc::def::ghi")?
-//! ```
-//!
-//! The deserializing function should look something like
-//!
-//! ``` 
-//!     let kt = KeyTree::parse(s, None).unwrap();
-//!
-//!     // kt.to_ref() creates a reference to kt.
-//!     let hobbit: Hobbit = kt.to_ref().try_into().unwrap();
-//!     &dbg!(&hobbit);
-//!
-//! ```
-//! ## KeyTree Syntax Specification 
-//! 
-//! - Indentation has meaning and is 4 spaces, relative to the top key. Since indenting is relative
-//! to the top key, then you can neatly align strings embedded in code.
-//! 
-//! - Each line can be empty, have whitespace only, be a comment, be a key, or be a key/value pair.
-//! 
-//! - There are keys and values. Key/value pairs look like
-//! 
-//! ```text
-//! name: Frodo
-//! ```
-//! Keys have children indented 4 spaces below them. The children can be either keys or key/value pairs.
-//! 
-//! ```text
-//! hobbit:
-//!     name: Frodo
-//! ```
-//! hobbit refers to the name of the struct or enum. In this way, the data maps simply to Rust
-//! data-structures.
-//! 
-//! - If a key has many children with the same key, it forms a collection, for example
-//! 
-//! ```test
-//! hobbit:
-//!     name: Frodo
-//!     name: Bilbo
-//! ```
-//! is a collection of hobbits. Sibling keys with the same name must be contiguous. 
-//! 
-//! - Keys must not include but must be followed by a colon `:`.
-//! 
-//! - Values are all characters between the combination of ':' and whitespace and the end of the
-//! line. The value is trimmed of whitespace at both ends.
-//! 
-//! - Comments can only be on their own line. A comment line starts with any amount of whitespace followed by `//`.
-//! 
-//! ```text
-//! // comment
-//! hobbit:
-//!     // another comment
-//!     name: Frodo
-//! ```
 
-#![forbid(unsafe_code)]
+// Redo the Keytree data-structure by dropping the original string and building a Vector of tokens,
+// where tokens contain pointers to other tokens, and with debug information. This removes any
+// pointers into the original string, making the data-structure more compact, and making it much
+// easier for client libraries to use because there are not lifetimes to manage.
 
-mod builder;
+// Use macros to automate most TryInto implementations.
 
-pub(crate) mod parser;
+mod parser;
 pub mod serialize;
 
-use anyhow::{anyhow, bail, Error, Result};
-use std::{convert::TryInto, fmt::{self, Display}, path::{Path, PathBuf}, str::FromStr};
-use crate::parser::Builder;
+use crate::parser::Parser;
+use thiserror::Error;
+use std::{cmp::Ordering, fmt::{self, Display}, path::{Path, PathBuf}, str::FromStr};
 
-// Somethin like "abc::def::ghi". A `KeyPath` is used to follow keys into a keytree. Think of
+type Result<T> = std::result::Result<T, KeyTreeError>;
+
+// === Error ======================================================================================
+
+#[derive(Error, Debug, PartialEq)]
+pub enum KeyTreeError {
+
+    // Parsing Errors
+
+    // indent
+    #[error("Bad indent of {0}")]
+    BadIndentTemp(usize),
+
+    // indent, line
+    #[error("Bad indent of {0} on line [{1}]")]
+    BadIndent(usize, usize),
+
+    #[error("Failed to read file [{0}]")]
+    IO(String),
+    
+    // Message, Token, line
+    #[error("{0} [{1}] on line {2}")]
+    Parse(String, String, usize),
+
+    #[error("Empty string")]
+    ParseEmpty,
+
+    #[error("No tokens")]
+    ParseNoTokens,
+
+    // Search Errors
+    
+    #[error("{0}")]
+    Search(String),   
+}
+
+impl KeyTreeError {
+    pub(crate) fn into_bad_indent(&self, line_num: usize) -> KeyTreeError {
+        match self {
+            KeyTreeError::BadIndentTemp(indent) => KeyTreeError::BadIndent(*indent, line_num),
+            _ => panic!("This is a bug - expected BadIndentTemp"),
+        }
+    }
+}
+
+// === KeyPath ====================================================================================
+
+// Something like "abc::def::ghi". A `KeyPath` is used to follow keys into a key-tree. Think of
 // `KeyPath` as an iterator with a double window looking into a (parent segment, child segment).
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub (crate) struct KeyPath {
     segments: Vec<String>,
     
@@ -209,105 +122,191 @@ impl KeyPath {
     }
 }
 
-trait StringConcat {
-    fn string_concat(&self, f: fn (String) -> String) -> String;
-}
-
-impl StringConcat for Vec<String> {
-    fn string_concat(&self, f: fn (String) -> String) -> String {
-        let mut s = String::new();
-        for segment in self {
-            s.push_str(&f(segment.to_string()));
-        }
-        s
+impl fmt::Debug for KeyPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 
 impl Display for KeyPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = self.segments.string_concat(|seg| format!("{}::", seg));
-        s.pop();
-        s.pop();
-        write!(f, "{}", s)
+        for (i, segment) in self.segments.iter().enumerate() {
+            write!(f, "{}", segment)?;
+            if i < self.segments.len() - 1 { write!(f, "::")? };
+        };
+        Ok(())
     }
 }
 
-// A Token represents a parsed line of a keytree string. It contains a pointer to its `next`
-// sibling. A `KeyValue` token contains a `Vec` of its children, the first value of the tuple is
-// the child token's key. The second value is the tokens index in the `KeyTree` struct. The `line`
-// field locates the error in the original keytree string and is passed on to errors.
-#[derive(Clone, Debug)]
-pub(crate) enum Token<'a> {
+impl Ord for KeyPath {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for n in 0..self.segments.len() {
+            match self.segments[n].cmp(&other.segments[n]) {
+                Ordering::Less => return Ordering::Less,
+                Ordering::Greater => return Ordering::Greater,
+                Ordering::Equal => {},
+            }
+        }
+        Ordering::Equal
+    }
+}
+
+impl PartialOrd for KeyPath {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.segments.cmp(&other.segments))
+    }
+}
+
+// === Keytree ====================================================================================
+
+// Holds the token data.
+#[derive(Debug)]
+struct KeyTreeData(Vec<Token>);
+
+impl KeyTreeData {
+
+    // No bounds checking.
+    pub(crate) fn token(&self, ix: usize) -> Token {
+        self.0[ix].clone()
+    }
+
+    pub(crate) fn new() -> Self { KeyTreeData(Vec::new()) }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn append_token(&mut self, tok: Token) -> usize {
+        self.0.push(tok);
+        self.0.len() - 1
+    }
+
+    // No bounds checking.
+    pub(crate) fn siblings(&self, ix: usize) -> Vec<usize> {
+        let mut acc = Vec::new();
+        let mut token = self.token(ix);
+        acc.push(ix);
+        // Recursive
+        while let Some(ix) = token.next() {
+            acc.push(ix);
+            token = self.token(ix);
+        }
+        acc
+    }
+}
+
+// Clone just clones the part of the Vec that is on the stack.
+impl Clone for KeyTreeData {
+    fn clone(&self) -> Self {
+        KeyTreeData(self.0.clone())
+    }
+}
+
+// === DebugInfo ====================================================================================
+
+// Pass around KeyTree level debugging info.
+#[derive(Debug)]
+pub(crate) struct DebugInfo {
+    _last_path: Option<KeyPath>, 
+    file: Option<PathBuf>,
+}
+
+impl DebugInfo {
+    pub (crate) fn new(file: Option<&Path>) -> DebugInfo {
+        DebugInfo {
+            _last_path: None,
+            file: file.map(|p| p.to_path_buf()),
+        }
+    }
+}
+
+// We'll implement this explicitly because when the struct becomes more powerful, we'll want to
+// result its history.
+impl Clone for DebugInfo {
+    fn clone(&self) -> Self {
+        Self {
+            _last_path: None,
+            file: self.file.clone(),
+        }
+    }
+}
+
+// === Token ======================================================================================
+
+#[derive(Clone, Debug, PartialEq)]
+pub (crate) enum Token {
     Key {
-        key:        &'a str,
-        children:   Vec<(&'a str, usize)>,
+        key:        String, 
+        children:   Vec<usize>,
         next:       Option<usize>,
-        line:       usize, 
+        debug:      TokenDebugInfo,
     },
     KeyValue {
-        key:        &'a str,
-        value:      &'a str,
-        next:       Option<usize>,
-        line:       usize,
+        key:    String,
+        value:  String,
+        next:   Option<usize>,
+        debug:  TokenDebugInfo,
     },
 }
 
-impl<'a> Token<'a> {
+impl Token {
 
-    pub fn line(&self) -> usize {
+    pub(crate) fn debug_info(&self) -> &TokenDebugInfo {
         match self {
-            Token::Key { line, .. } => *line,
-            Token::KeyValue { line, .. } => *line,
+            Token::Key {debug, ..} => debug,
+            Token::KeyValue {debug, ..} => debug,
         }
     }
 
-    pub fn key(&self) -> &'a str {
+    pub(crate) fn key(&self) -> &String {
         match self {
             Token::Key {key, ..} => key,
             Token::KeyValue {key, ..} => key,
         }
     }
-
+    
     // Will panic if called on a Token::Key. Always check before invoking this function.
-    pub fn value(&self) -> &'a str {
+    pub (crate) fn value(&self) -> &String {
         match self {
-            Token::Key {..} => panic!(),
-            Token::KeyValue { value, ..} => value,
+            Token::Key {..} => panic!("This is a bug"),
+            Token::KeyValue {value, ..} => value,
         }
     }
 
-    pub fn next(&self) -> Option<usize> {
+    pub (crate) fn next(&self) -> Option<usize> {
         match self {
-            Token::Key { next, .. } => *next,
-            Token::KeyValue { next, .. } => *next,
+            Token::Key {next: n, ..} => *n,
+            Token::KeyValue {next: n, ..} => *n,
         }
     }
 
-    // Used for building the parsed keytree. Set the next iteration of the Token to a token with
-    // index token_i.
-    pub fn set_next(&mut self, token_i: usize) {
+    #[allow(dead_code)]
+    fn children(&self) -> Vec<usize> {
         match self {
-            Token::KeyValue {ref mut next, ..  } => {
-                *next = Some(token_i);
-            },
-            Token::Key {ref mut next, .. } => {
-                *next = Some(token_i);
-            },
+            Token::Key {children, ..} => children.to_vec(),
+            Token::KeyValue {..} => panic!("This is a bug"),
         }
     }
 
-    // Used for building the parsed keytree.
-    pub fn set_child(&mut self, key: &'a str, child_ix: usize) {
+    // Used during building of keytree. Set the next iteration of the Token to a token with
+    // token index.
+    pub (crate) fn set_next_link(&mut self, ix: usize) {
         match self {
-            Token::Key { children, .. } => {
-                children.push((key, child_ix))
-            },
-            Token::KeyValue {..} => { panic!() },
+            Token::Key {ref mut next, ..} => *next = Some(ix),
+            Token::KeyValue {ref mut next, ..} => *next = Some(ix),
+        }
+    }
+
+    // Used during building of keytree.
+    pub (crate) fn set_link_to_child(&mut self, child_ix: usize) {
+        match self {
+            Token::Key {children, ..} => children.push(child_ix),
+            Token::KeyValue {..} => { panic!("This is a bug") },
         }
     }
 }
 
-impl<'a> fmt::Display for Token<'a> {
+impl fmt::Display for Token {
    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Key { key, .. } => write!(f, "{}:", key),
@@ -318,50 +317,106 @@ impl<'a> fmt::Display for Token<'a> {
     }
 }
 
-/// The parsed keytree string.
+// === TokenDebugInfo ==================================================================================
+
+#[derive(Clone, Debug, PartialEq)]
+pub (crate) struct TokenDebugInfo {
+    line_num: usize,
+}
+
+impl TokenDebugInfo {
+    pub(crate) fn line_num(&self) -> usize {
+        self.line_num
+    }
+}
+
+// === KeyTree ========================================================================================
+
 #[derive(Debug)]
-pub struct KeyTree<'a> {
-    tokens: Vec<Token<'a>>,
-    filename: Option<PathBuf>,
+pub struct KeyTree {
+    data: KeyTreeData,
+    debug: DebugInfo,
+    index: usize,
 }
 
-impl<'a> KeyTree<'a> {
+impl KeyTree {
 
-    /// Parse the keytree string. A filename can be input for error handling.
-    pub fn parse(s: &'a str, filename: Option<&Path>) -> Result<Self> {
-        Builder::parse(s, filename)
-    }
-    
-    pub fn to_ref(&'a self) -> KeyTreeRef<'a> {
-        KeyTreeRef(self, 0)
+    /// Parse a string into a data-structure.
+    /// ```
+    /// use std::convert::TryInto;
+    /// use key_tree::{KeyTree, KeyTreeError};
+    /// 
+    /// static HOBBITS: &'static str = r"
+    /// hobbit:
+    ///     name:         Frodo Baggins
+    ///     age:          60
+    ///     friends:
+    ///         hobbit:
+    ///             name: Bilbo Baggins
+    ///             age:  111
+    ///         hobbit:
+    ///             name: Samwise Gamgee
+    ///             age:  38
+    ///             nick: Sam
+    /// ";
+    /// 
+    /// #[derive(Debug)]
+    /// struct Hobbit {
+    ///     name: String,
+    ///     age: u32,
+    ///     friends: Vec<Hobbit>,
+    ///     nick: Option<String>,
+    /// }
+    /// 
+    /// impl<'a> TryInto<Hobbit> for KeyTree {
+    ///     type Error = KeyTreeError;
+    /// 
+    ///     fn try_into(self) -> Result<Hobbit, Self::Error> {
+    ///         Ok(
+    ///             Hobbit {
+    ///                 name:       self.from_str("hobbit::name")?,
+    ///                 age:        self.from_str("hobbit::age")?,
+    ///                 friends:    self.opt_vec_at("hobbit::friends::hobbit")?,
+    ///                 nick:       self.opt_from_str("hobbit::nick")?,
+    ///             }
+    ///         )
+    ///     }
+    /// }
+    ///
+    /// let hobbit: Hobbit = KeyTree::parse_str(HOBBITS)
+    ///     .unwrap()
+    ///     .try_into()
+    ///     .unwrap();
+    /// ```
+    pub fn parse_str(s: &str) -> Result<KeyTree> {
+        let (data, debug) = Parser::parse_str(s)?;
+        Ok(Self::new(data, debug))
     }
 
-    pub (crate) fn siblings(&self, index: usize) -> Vec<usize> {
-        let token = self.tokens[index].clone();
-        
-        let mut v = vec!(index);
-        let mut tok = token;
-        while let Some(ix) = tok.next() {
-            v.push(ix);
-            tok = self.tokens[ix].clone();
+    /// Parse a file into a data-structure.
+    /// ```ignore
+    /// let hobbit: Hobbit = KeyTree::parse("hobbits.keytree")
+    ///     .unwrap()
+    ///     .try_into()
+    ///     .unwrap();
+    /// ```
+    pub fn parse<P: AsRef<Path>>(path: P) -> Result<KeyTree> {
+        let (data, debug) = Parser::parse(path)?;
+        Ok(Self::new(data, debug))
+    }
+
+    pub(crate) fn new(data: KeyTreeData, debug: DebugInfo) -> Self {
+        KeyTree {
+            data,
+            debug,
+            index: 0,
         }
-        v
-    }
-}
-
-/// A lightweight reference into the parsed keytree string.
-#[derive(Clone, Copy, Debug)]
-pub struct KeyTreeRef<'a>(&'a KeyTree<'a>, pub usize);
-
-impl<'a> KeyTreeRef<'a> {
-
-    /// Useful for debugging.
-    pub fn current_line(&self) -> usize {
-        self.0.tokens[self.1].line()
     }
 
-    pub (crate) fn top_token(&self) -> &'a Token<'a> {
-        &self.0.tokens[self.1]
+    // TODO impl Clone
+
+    pub (crate) fn top_token(&self) -> &Token {
+        &self.data.0[self.index]
     }
 
     // Return child of the top token. If the top token is a Token::KeyValue then panic.
@@ -369,28 +424,24 @@ impl<'a> KeyTreeRef<'a> {
         let top_token = self.top_token();
 
         match top_token {
-            Token::KeyValue {..} => panic!(),
+            Token::KeyValue {..} => panic!("This is a bug"),
             Token::Key { children, .. } => {
-
-                for (k, ix) in children {
-                    if &key == k {
-                        return Some(*ix)
-                    }
-                }
-                None
+                children.iter().find(|&&ix| self.data.0[ix].key() == key).copied()
             },
         }
     }
 
     fn set_cursor(&mut self, ix: usize) {
-        self.1 = ix;
+        self.index = ix;
     }
 
     pub (crate) fn assert_top_token_is_keyvalue(&self) -> Result<()> {
         match self.top_token() {
             Token::KeyValue {..} => Ok(()),
-            Token::Key { key, line, .. } => {
-                bail!(format!("Expected keyvalue found key {} at {}.", key, line))
+            Token::Key { key, debug, .. } => {
+                return Err(KeyTreeError::Search(format!(
+                    "Expected keyvalue found key {} at {}.", key, debug.line_num,
+                )))
             },
         }
     }
@@ -399,9 +450,9 @@ impl<'a> KeyTreeRef<'a> {
         if self.top_token().key() == parent_segment {
             Ok(())
         } else {
-            Err(anyhow!(
+            Err(KeyTreeError::Search(
                 format!("First segment mismatch [{}. {} {}].",
-                    self.top_token().line(),
+                    self.top_token().debug_info().line_num(),
                     &self.top_token(),
                     parent_segment,
                 )
@@ -411,10 +462,10 @@ impl<'a> KeyTreeRef<'a> {
 
     pub (crate) fn key_into<T>(self) -> Result<T>
     where
-        KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        KeyTree: TryInto<T>,
+        KeyTree: TryInto<T, Error = KeyTreeError>,
     {
-        // Use the client implementation `TryInto<T> for KeyTreeRef`.
+        // Use the client implementation `TryInto<T> for KeyTree`.
         self.try_into()
     }
 
@@ -426,76 +477,78 @@ impl<'a> KeyTreeRef<'a> {
         let token = self.top_token();
 
         T::from_str(token.value())
-            .map_err(|_| anyhow!(format!("Failed to parse {} at {}.", token, token.line())))
+            .map_err(|_| KeyTreeError::Search(format!("Failed to parse {} at {}.", token, token.debug_info().line_num())))
     }
 
-    /// Returns a `Some<KeyTree>` if the path exists or `None` otherwise.
+    /// Parses a `KeyTree` token into an optional value. 
     pub fn opt_at<T>(&self, key_path: &str) -> Result<Option<T>>
     where
-        KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        KeyTree: TryInto<T>,
+        KeyTree: TryInto<T, Error = KeyTreeError>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
         match kts.len() {
             0 => Ok(None),
-            1 => Ok(Some(kts[0].key_into()?)),
-            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            1 => Ok(Some(kts[0].clone().key_into()?)),
+            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
-    /// Returns a `KeyTree`.
+    /// Parses a `KeyTree` token into a value.
     pub fn at<T>(&self, key_path: &str) -> Result<T>
     where
-        Self: TryInto<T, Error = Error>,
+        Self: TryInto<T, Error = KeyTreeError>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
+        dbg!("here");
         match kts.len() {
-            0 => Err(anyhow!(format!("Expected unique keyvalue found none at {}.", key_path))),
-            1 => Ok(kts[0].key_into()?),
-            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            0 => Err(KeyTreeError::Search(format!("Expected unique keyvalue found none at {}.", key_path))),
+            1 => Ok(kts[0].clone().key_into()?),
+            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
-    /// ```
-    /// use std::convert::TryInto;
-    /// use std::str::FromStr;
-    /// 
-    /// use keytree::{KeyTree, KeyTreeRef};
-    /// use keytree::Error;
-    ///  
-    /// static TEMP: &'static str = r#"
-    /// example:
-    ///     temp: -15.3
-    /// "#;
-    ///  
-    /// #[derive(Debug)]
-    /// struct Temperature(f32);
-    /// 
-    /// impl FromStr for Temperature {
-    ///     type Err = std::num::ParseFloatError;
-    /// 
-    ///     fn from_str(s: &str) -> Result<Self, Self::Err> {
-    ///         s.parse()
-    ///     }
-    /// }
-    ///  
-    /// impl<'a> TryInto<Temperature> for KeyTreeRef<'a> {
-    ///     type Error = Error;
-    ///  
-    ///     fn try_into(self) -> Result<Temperature, Error> {
-    ///         Ok(Temperature(self.from_str("example::temp")?))
-    ///     }
-    /// }
-    ///  
-    /// fn main() {
-    ///     let kt = KeyTree::parse(TEMP).unwrap();
-    ///     let temp: Temperature = kt.to_ref().try_into().unwrap();
-    ///     println!("{:?}", temp);
-    ///     // Temperature(-15.3)
-    /// }
-    /// ```
+    // ```
+    // use std::convert::TryInto;
+    // use std::str::FromStr;
+    // 
+    // use keytree::KeyTree;
+    // use keytree::KeyTreeError;
+    //  
+    // static TEMP: &'static str = r#"
+    // example:
+    //     temp: -15.3
+    // "#;
+    //  
+    // #[derive(Debug)]
+    // struct Temperature(f32);
+    // 
+    // impl FromStr for Temperature {
+    //     type Err = std::num::ParseFloatError;
+    // 
+    //     fn from_str(s: &str) -> Result<Self, Self::Err> {
+    //         s.parse()
+    //     }
+    // }
+    //  
+    // impl<'a> TryInto<Temperature> for KeyTree {
+    //     type Error = KeyTreeError;
+    //  
+    //     fn try_into(self) -> Result<Temperature, KeyTreeError> {
+    //         Ok(Temperature(self.from_str("example::temp")?))
+    //     }
+    // }
+    //  
+    // fn main() {
+    //     let kt = KeyTree::parse(TEMP).unwrap();
+    //     let temp: Temperature = kt.try_into().unwrap();
+    //     println!("{:?}", temp);
+    //     // Temperature(-15.3)
+    // }
+    // ```
+
     pub fn from_str<T>(&self, key_path: &str) -> Result<T>
     where 
         T: FromStr,
@@ -503,9 +556,9 @@ impl<'a> KeyTreeRef<'a> {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
         match kts.len() {
-            0 => Err(anyhow!(format!("Expected unique keyvalue found none at {}.", key_path))),
+            0 => Err(KeyTreeError::Search(format!("Expected unique keyvalue found none at {}.", key_path))),
             1 => Ok(kts[0].keyvalue_into()?),
-            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -520,7 +573,7 @@ impl<'a> KeyTreeRef<'a> {
         match kts.len() {
             0 => Ok(None),
             1 => Ok(Some(kts[0].keyvalue_into()?)),
-            _ => Err(anyhow!(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
         }
     }
 
@@ -538,16 +591,16 @@ impl<'a> KeyTreeRef<'a> {
             v.push(kt.keyvalue_into()?)
         }
         if v.is_empty() {
-            match &self.0.filename {
+            match &self.debug.file {
                 Some(f) => {
-                    return Err(anyhow!(format!(
+                    return Err(KeyTreeError::Search(format!(
                         "Expected non-empty collection in [{}] at [{}].",
                         f.display(),
                         key_path,
                     )))
                 },
                 None => {
-                    return Err(anyhow!(format!(
+                    return Err(KeyTreeError::Search(format!(
                         "Expected non-empty collection at [{}].",
                         key_path,
                     )))
@@ -576,8 +629,8 @@ impl<'a> KeyTreeRef<'a> {
     /// exist.
     pub fn vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
-        KeyTreeRef<'a>: TryInto<T>,
-        KeyTreeRef<'a>: TryInto<T, Error = Error>,
+        KeyTree: TryInto<T>,
+        KeyTree: TryInto<T, Error = KeyTreeError>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
@@ -588,7 +641,7 @@ impl<'a> KeyTreeRef<'a> {
         }
         if v.is_empty() {
             return Err(
-                anyhow!(format!("Expected non-empty collection at {}.", key_path))
+                KeyTreeError::Search(format!("Expected non-empty collection at {}.", key_path))
             )
         };
         Ok(v)
@@ -599,7 +652,7 @@ impl<'a> KeyTreeRef<'a> {
     pub fn opt_vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         Self: TryInto<T>,
-        Self: TryInto<T, Error = Error>,
+        Self: TryInto<T, Error = KeyTreeError>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
@@ -612,7 +665,7 @@ impl<'a> KeyTreeRef<'a> {
     }
 
     // Takes a `KeyPath` and follows it through the tree, returning a Vec of `KeyTreeRef`s.
-    pub (crate) fn resolve_path(self, key_path: &KeyPath) -> Result<Vec<Self>> {
+    pub (crate) fn resolve_path(&self, key_path: &KeyPath) -> Result<Vec<Self>> {
 
         match (self.top_token(), key_path.is_last()) {
 
@@ -630,8 +683,8 @@ impl<'a> KeyTreeRef<'a> {
                     None =>  Ok(Vec::new()),
                     Some(ix) => {
                         let mut v = Vec::new();
-                        let mut kt = self;
-                        for sibling_ix in self.0.siblings(ix) {
+                        for sibling_ix in self.data.siblings(ix) {
+                            let mut kt = self.clone(); 
                             kt.set_cursor(sibling_ix);
                             v.push(kt);
                         }
@@ -656,7 +709,7 @@ impl<'a> KeyTreeRef<'a> {
                         Ok(Vec::new())   // Option
                     },
                     Some(ix) => {
-                        let mut kt = self;
+                        let mut kt = self.clone();
                         kt.set_cursor(ix);
                         path.advance();
                         kt.resolve_path(&path)
@@ -667,9 +720,9 @@ impl<'a> KeyTreeRef<'a> {
             // Last segment of keyvalue.
             (Token::KeyValue { .. }, true) => {
 
-                let mut kt = self;
                 let mut v = Vec::new();
-                for sibling_ix in self.0.siblings(self.1) {
+                for sibling_ix in self.data.siblings(self.index) {
+                    let mut kt = self.clone();
                     kt.set_cursor(sibling_ix);
                     v.push(kt);
                 }
@@ -678,11 +731,11 @@ impl<'a> KeyTreeRef<'a> {
 
             // Before the last segment of keyvalue. If such as unresolved keypath is a keyvalue
             // then return an error.
-            (Token::KeyValue { key, value, line, .. }, false) => {
+            (Token::KeyValue { key, value, debug, .. }, false) => {
 
-                return Err(anyhow!(
+                return Err(KeyTreeError::Search(
                     format!("Line {} keypath {}. Keypath_extends_beyond_keyvalue {}: {}.",
-                        *line,
+                        debug.line_num(),
                         &key_path,
                         key,
                         value,
@@ -693,3 +746,216 @@ impl<'a> KeyTreeRef<'a> {
         } // match {
     }
 }
+
+impl Clone for KeyTree {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            debug: self.debug.clone(),
+            index: self.index,
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use indoc::indoc;
+    use super::*;
+
+    fn debug() -> TokenDebugInfo {
+        TokenDebugInfo {
+            line_num: 42,
+        }
+    }
+
+    fn key_token() -> Token {
+        Token::Key {
+            key: "key".to_owned(),
+            children: vec![1],
+            next: None,
+            debug: debug(),
+        }
+    }
+
+    fn keyval_token() -> Token {
+        Token::KeyValue {
+            key: "key".to_owned(),
+            value: "value".to_owned(),
+            next: None,
+            debug: debug()
+        }
+    }
+
+    // === KeyPath ================================================================================
+
+    #[test]
+    fn display_should_work() {
+        let s = "abc::def::ghi";
+        assert_eq!(KeyPath::from_str(s).to_string(), s)
+    }
+
+    #[test]
+    fn key_path_should_be_comparable() {
+        assert!(
+            KeyPath::from_str("aaa::aaa") < KeyPath::from_str("aaa::aab")
+        )
+    }
+
+    // === DebugInfo ==============================================================================
+
+    #[test]
+    fn debuginfo_new_should_work() {
+        DebugInfo::new(Some(&Path::new("test")));
+    }
+
+    // === Token tests ============================================================================
+
+    #[test]
+    fn key_token_should_work() {
+        let _tok = key_token();
+    }
+
+    #[test]
+    fn keyval_token_should_work() {
+        let _tok = keyval_token();
+    }
+
+    #[test]
+    fn token_should_have_debug_info() {
+        let tok = keyval_token();
+        assert_eq!(tok.debug_info().line_num, 42);
+    }
+
+    #[test]
+    fn token_should_have_key() {
+        let tok = keyval_token();
+        assert_eq!(tok.key(), &"key".to_owned());
+    }
+
+    #[test]
+    fn keyval_token_should_have_value() {
+        let tok = keyval_token();
+        assert_eq!(tok.value(), &"value".to_owned());
+    }
+
+    #[test]
+    fn set_next_link_should_work() {
+        let mut tok = keyval_token();
+        tok.set_next_link(12);
+        assert_eq!(tok.next(), Some(12));
+    }
+
+    #[test]
+    fn set_link_to_child_should_work() {
+        let mut tok =key_token();
+        tok.set_link_to_child(13);
+        let children = tok.children();
+        let mut iter = children.iter();
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next(), Some(&13));
+        assert_eq!(iter.next(), None);
+    }
+
+    // === KeyTreeData tests ===================================================================
+
+    #[test]
+    fn next_sibling_should_be_set() {
+        let s = indoc!("
+            key1:
+                keyval: a
+                keyval: b");
+        let kt = Parser::parse_str(&s).unwrap().0;
+        assert_eq!(kt.0[1].next(), Some(2));
+    }
+
+    #[test]
+    fn should_get_siblings() {
+        let s = indoc!("
+            key1:
+                keyval: a
+                keyval: b");
+        let kt = KeyTree::parse_str(&s).unwrap();
+        assert!(kt.data.siblings(1) == vec![1,2]);
+    }
+
+    // === KeyTree search tests ===================================================================
+    
+    #[test]
+    fn should_parse() {
+        let s = indoc! {r"
+            hobbit:
+                name: Frodo Baggins
+                age:  60
+            "};
+        let kt = KeyTree::parse_str(&s).unwrap();
+
+        assert_eq!(kt.data.0[0].children(), vec![1,2]);
+        assert_eq!(kt.data.0[1].value(), "Frodo Baggins");
+        assert_eq!(kt.data.0[2].value(), "60");
+    }
+    
+
+    #[test]
+    fn should_parse_and_coerce() {
+
+        use std::str::FromStr;
+
+        #[derive(Debug)]
+        struct Hobbit {
+             name: String,
+             age:  u32,
+        }
+
+        impl TryInto<Hobbit> for KeyTree {
+            type Error = KeyTreeError;
+
+            fn try_into(self) -> Result<Hobbit> {
+                Ok(
+                    Hobbit {
+                        name: self.from_str("hobbit::name")?,
+                        age: self.from_str("hobbit::age")?,
+                    }
+                )
+            }
+        }
+
+        let s = indoc! {r"
+            hobbit:
+                name: Frodo Baggins
+                age:  60
+            "};
+        let kt = KeyTree::parse_str(&s).unwrap();
+
+        assert_eq!(kt.data.0[2].value(), "60");
+
+        let kt: KeyTree = KeyTree::parse_str(&s).unwrap();
+        let hobbit: Hobbit = kt.try_into().unwrap();
+    }
+
+    // #[test]
+    // fn should_derive() {
+
+    //     use std::str::FromStr;
+    //     use keytree_derive::KeyTree;
+
+    //     #[derive(Debug, KeyTree)]
+    //     struct Hobbit {
+    //          name: String,
+    //          age:  u32,
+    //     }
+
+    //     let s = indoc! {r"
+    //         hobbit:
+    //             name: Frodo Baggins
+    //             age:  60
+    //         "};
+    //     let kt = KeyTree::parse_str(&s).unwrap();
+
+    //     assert_eq!(kt.data.0[2].value(), "60");
+
+    //     let kt: KeyTree = KeyTree::parse_str(&s).unwrap();
+    //     let hobbit: Hobbit = kt.try_into().unwrap();
+    // }
+}
+
+
