@@ -30,7 +30,7 @@ pub enum KeyTreeError {
     #[error("Bad indent of {0} on line [{1}]")]
     BadIndent(usize, usize),
 
-    #[error("Failed to read file [{0}]")]
+    #[error("File '{0}' not found")]
     IO(String),
     
     // Message, Token, line
@@ -880,7 +880,25 @@ mod test {
 
         let kt: KeyTree = KeyTree::parse_str(&s).unwrap();
         let hobbit: Hobbit = kt.try_into().unwrap();
+
     }
+
+    // === KeyTree ================================================================================
+
+    #[test]
+    fn parse_should_fail_if_file_missing() {
+        match KeyTree::parse("missing") {
+            Ok(_) => assert!(false),
+            Err(e) => {
+                assert_eq!(
+                    e.to_string(),
+                    "File 'missing' not found",
+                )
+            },
+        }
+    }
+
+    // === TryInto derive =========================================================================
 
     // #[test]
     // fn should_derive() {
@@ -907,5 +925,4 @@ mod test {
     //     let hobbit: Hobbit = kt.try_into().unwrap();
     // }
 }
-
 
