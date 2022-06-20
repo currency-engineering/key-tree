@@ -198,8 +198,6 @@ impl Builder {
 
             (Ordering::Less, Some(previous_sib_ix)) => {
 
-                dbg!();
-
                 // Append the new token to the keytree Vec.
                 let ix = self.data.append_token(token);
 
