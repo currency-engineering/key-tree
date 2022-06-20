@@ -198,13 +198,18 @@ impl Builder {
 
             (Ordering::Less, Some(previous_sib_ix)) => {
 
+                dbg!();
+
                 // Append the new token to the keytree Vec.
                 let ix = self.data.append_token(token);
 
                 // Don't set parent link.
-
+                
                 // Remove deeper last_tokens.
                 self.last_tokens.remove_deeper_than(new_indent);
+
+                // Set sibling link.
+                self.set_next_link(previous_sib_ix, ix);
 
                 // Replace last
                 self.last_tokens.replace_last_token(new_indent, ix);
@@ -539,6 +544,7 @@ pub mod test {
 
     use super::*;
     use indoc::indoc;
+    use crate::KeyTree;
     use crate::{KeyTreeData, TokenDebugInfo};
     use crate::KeyTreeError::BadIndent;
     
@@ -807,5 +813,22 @@ pub mod test {
         } else {
             assert!(false)
         }
+    }
+
+    #[test]
+    fn multiple_keys_should_work() {
+        let s = r#"
+            seriess:
+                series:
+                    data_type:          u
+                    country:            Australia
+                    series_id:          AUSURAMS
+                series:
+                    data_type:          u
+                    country:            Australia
+                    series_id:          AUSURANAA
+        "#;
+        let kt = KeyTree::parse_str(s).unwrap();
+        assert_eq!(&kt.data.0[1].next(), &Some(5));
     }
 }
