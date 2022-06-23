@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
 use crate::{DebugInfo, KeyTreeData, KeyTreeError, Result, Token, TokenDebugInfo};
-use std::{fs, path::{Path, PathBuf}};
-use std::{cmp::Ordering};
+use std::{cmp::Ordering, path::Path};
 
 pub(crate) const INDENT_STEP: usize = 4;
 
@@ -38,7 +37,7 @@ impl Punct {
     }
 }
 
-// === Builder ====================================================================================
+// ===Builder======================================================================================
 
 // Holds on to some extra start while we are building a KeyTree.
 #[derive(Debug)]
@@ -49,9 +48,13 @@ pub (crate) struct Builder {
 }
 
 impl Builder {
-    pub(crate) fn new() -> Builder {
+    pub(crate) fn new(path: Option<&Path>) -> Builder {
+        let data = KeyTreeData {
+            data: Vec::new(),
+            path: path.map(|path| path.to_path_buf()),
+        };
         Builder {
-            data: KeyTreeData::new(),
+            data,
             last_tokens: LastTokens::new(),
             indent: 0,
         }
@@ -95,7 +98,7 @@ impl Builder {
     }
 
     fn set_next_link(&mut self, previous_sib_ix: usize, sib_ix: usize) {
-        match self.data.0.get_mut(previous_sib_ix) {
+        match self.data.data.get_mut(previous_sib_ix) {
             Some(Token::Key {next,..}) => *next = Some(sib_ix),
             Some(Token::KeyValue {ref mut next,..}) => *next = Some(sib_ix),
             None => { panic!("This is a bug") },
@@ -103,7 +106,7 @@ impl Builder {
     }
 
     fn set_link_to_child(&mut self, parent_ix: usize, child_ix: usize) {
-        match &mut self.data.0.get_mut(parent_ix) {
+        match &mut self.data.data.get_mut(parent_ix) {
             Some(Token::Key {children,..}) => {
                 children.push(child_ix);
             },
@@ -272,26 +275,23 @@ pub(crate) struct Parser;
 
 impl Parser {
 
-    pub fn parse_str(s: &str) -> Result<(KeyTreeData, DebugInfo)> {
-        let path: Option<&Path> = None;
-        Self::parse_inner(s, path)
-    }
+    // pub fn parse_str(s: &str) -> Result<(KeyTreeData, Option<DebugInfo>)> {
+    //     let path: Option<&Path> = None;
+    //     Self::parse_inner(s, path)
+    // }
 
-    pub fn parse<P: AsRef<Path>>(path: P) -> Result<(KeyTreeData, DebugInfo)> {
-        let path: PathBuf = path.as_ref().to_path_buf();
+    // pub fn parse(path: &Path) -> Result<(KeyTreeData, DebugInfo)> {
+    //     let s = fs::read_to_string(&path).map_err(|_| KeyTreeError::IO(path.display()))?;
+    //     let debug = DebugInfo::new(
 
-        let path_string = path.to_str()
-            .ok_or(KeyTreeError::IO(String::new()))?.to_string();
 
-        let s = fs::read_to_string(&path).map_err(|_| KeyTreeError::IO(path_string))?;
 
-        Self::parse_inner(&s, Some(&path))
-    }
+    //     Self::parse_inner(&s, Some(&path))
+    // }
 
     // Parse a string into a `KeyTree`. If there is a filename, this can be input for error
     // handling. 
-    pub fn parse_inner(s: &str, path_opt: Option<&Path>) -> Result<(KeyTreeData, DebugInfo)> {
-        let debug_info = DebugInfo::new(path_opt);
+    pub fn parse(s: &str, path_opt: Option<&Path>) -> Result<KeyTreeData> {
 
         if s.is_empty() { return Err(KeyTreeError::ParseEmpty) };
         let lines = s.lines();
@@ -311,7 +311,7 @@ impl Parser {
         let mut last_pos;
 
         // Tokens are passed to the Builder
-        let mut builder = Builder::new();
+        let mut builder = Builder::new(path_opt);
 
         for (i, line) in lines.enumerate() {
             line_num = i + 1;
@@ -506,7 +506,7 @@ impl Parser {
         };
         match builder.data.is_empty() {
             true => Err(KeyTreeError::ParseNoTokens),
-            false => Ok((builder.owned_keytree(), debug_info)),
+            false => Ok(builder.owned_keytree()),
         }
     }
 }

@@ -4,6 +4,8 @@ pub trait IntoKeyTree {
     fn keytree(&self) -> KeyTreeString;
 }
 
+// ===Token========================================================================================
+
 pub enum Token {
     KeyToken(KeyToken),
     KeyValToken(KeyValToken),
@@ -20,6 +22,8 @@ impl Token {
     }
 }
 
+// ===KeyToken=====================================================================================
+
 pub struct KeyToken {
     indent: usize,
     key: String,
@@ -34,6 +38,8 @@ impl KeyToken {
         s
     }
 }
+
+// ===KeyValueToken=================================================================================
 
 pub struct KeyValToken {
     indent: usize,
@@ -53,6 +59,8 @@ impl KeyValToken {
     }
 }
 
+// ===Comment======================================================================================
+
 pub struct Comment {
     indent: usize,
     comment: String,
@@ -67,6 +75,8 @@ impl Comment {
         s
     }
 }
+
+// ===KeyTreeString================================================================================
 
 pub struct KeyTreeString {
     tokens: Vec<Token>,
@@ -195,6 +205,8 @@ fn padding(len: usize) -> String {
     }
     s
 }
+
+// ===Tests========================================================================================
 
 #[test]
 fn test_1() {
