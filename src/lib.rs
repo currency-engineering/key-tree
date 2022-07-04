@@ -10,53 +10,148 @@ mod parser;
 pub mod serialize;
 
 use crate::parser::Parser;
-use thiserror::Error;
-use std::{cmp::Ordering, fmt::{self, Display}, path::{Path, PathBuf}, str::FromStr};
+use std::{cmp::Ordering, error::Error, fmt::{self, Display}, path::{Path, PathBuf}, str::FromStr};
+use thiserror::Error as ThisError;
 
-type Result<T> = std::result::Result<T, KeyTreeError>;
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 // === Error ======================================================================================
 
-#[derive(Error, Debug, PartialEq)]
-pub enum KeyTreeError {
+// ---BadIndentTempError---------------------------------------------------------------------------
 
-    // Parsing Errors
+// This is required because we don't have complete information to form a BadIndentError
 
-    // indent
-    #[error("Bad indent of {0}")]
-    BadIndentTemp(usize),
+#[derive(ThisError, Debug, PartialEq)]
+#[error("BadIndentError({indent})")]
+pub struct BadIndentTempError { indent: usize }
 
-    // indent, line
-    #[error("Bad indent of {0} on line [{1}]")]
-    BadIndent(usize, usize),
-
-    #[error("File '{0}' not found")]
-    IO(String),
-    
-    // Message, Token, line
-    #[error("{0} [{1}] on line {2}")]
-    Parse(String, String, usize),
-
-    #[error("Empty string")]
-    ParseEmpty,
-
-    #[error("No tokens")]
-    ParseNoTokens,
-
-    // Search Errors
-    
-    #[error("{0}")]
-    Search(String),   
-}
-
-impl KeyTreeError {
-    pub(crate) fn into_bad_indent(&self, line_num: usize) -> KeyTreeError {
-        match self {
-            KeyTreeError::BadIndentTemp(indent) => KeyTreeError::BadIndent(*indent, line_num),
-            _ => panic!("This is a bug - expected BadIndentTemp"),
+impl BadIndentTempError {
+    pub(crate) fn into_bad_indent(&self, line_num: usize) -> BadIndentError {
+        BadIndentError {
+            indent: self.indent,
+            line_num,
         }
     }
 }
+
+// ---BadindentError--------------------------------------------------------------------------------
+// Keys must be indent by multiples of 4.
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("BadIndentError({indent}, {line_num})")]
+pub struct BadIndentError { indent: usize, line_num: usize }
+
+// ---ColonError---------------------------------------------------------------------------
+// Colons must not appear before a key.  
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("ColonError({token}, {line_num})")]
+pub struct ColonError { token: String, line_num: usize }
+
+// ---ExpectedKey-----------------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, ThisError)]
+#[error("ExpectedKey({token}, {line_num})")]
+pub struct ExpectedKey { token: Token, line_num: usize }
+
+// ---EmptyStringError------------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("EmptyStringError")]
+pub struct EmptyStringError;
+
+// ---FileNotFound----------------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq)]
+pub struct FileNotFound { path: PathBuf }
+
+impl fmt::Display for FileNotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FileNotFound({})", self.path.display())
+    }
+}
+impl Error for FileNotFound {}
+
+// ---FirstSegmentMismatchError---------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, ThisError)]
+#[error("FirstSegmentMismatchError({top_token}, {parent_segment}, {line_num})")]
+pub struct FirstSegmentMismatchError { top_token: Token, parent_segment: String, line_num: usize }
+
+// ---IncompleteCommentOrKeyError-------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("IncompleteCommentOrKeyError({token}, {line_num})")]
+pub struct IncompleteCommentOrKeyError { token: String, line_num: usize }
+
+// ---IncompleteLineError---------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("IncompleteLineError({line_num})")]
+pub struct IncompleteLineError { token: String, line_num: usize }
+
+// ---KeyPathTooLongError---------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("KeyPathTooLongError({line_num})")]
+pub struct KeyPathTooLongError{ key_path: KeyPath, token: Token, line_num: usize }
+
+// ---KeySearchError--------------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("KeySearchError({expected}, {found}, {key_path})")]
+pub struct KeySearchError { expected: String, found: String, key_path: KeyPath }
+
+fn key_search_error(expected: &str, found: &str, key_path: KeyPath) -> KeySearchError {
+    KeySearchError {
+        expected: expected.to_string(),
+        found: found.to_string(),
+        key_path,
+    }
+}
+
+// ---KeyValueToStringError------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("KeyValueToStringError({token}, {line_num})")]
+pub struct KeyValueToStringError{ token: Token, line_num: usize }
+
+// ---NoColonAfterKeyError-------------------------------------------------------------------------
+
+// A error that occurs while parsing a keytree string. A colon is required after a key.
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("NoColonAfterKey({token}, {line_num})")]
+pub struct NoColonAfterKeyError { token: String, line_num: usize }
+
+// ---NoSpaceAfterKeyError-------------------------------------------------------------------------
+
+// A error that occurs while parsing a keytree string. A space is required after the ending colon
+// in a key.
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("NoSpaceAfterKeyError({token}, {line_num})")]
+pub struct NoSpaceAfterKeyError { token: String, line_num: usize }
+
+// ---NoTokensError--------------------------------------------------------------------------------
+
+// A error that occurs while parsing a keytree string.
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("NoTokensError")]
+pub struct NoTokensError;
+
+// --TopTokenNotKeyValueError----------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("TopTokenNotKeyValueError({top_token})")]
+pub struct TopTokenNotKeyValueError { top_token: Token }
+
+// ---UTFError-------------------------------------------------------------------------------------
+
+#[derive(ThisError, Debug, PartialEq)]
+#[error("UTFError()")]
+pub struct UTFError;
 
 // === KeyPath ====================================================================================
 
@@ -326,7 +421,8 @@ impl KeyTree {
     /// Parse a string into a data-structure.
     /// ```
     /// use std::convert::TryInto;
-    /// use key_tree::{KeyTree, KeyTreeError};
+    /// use std::error::Error;
+    /// use key_tree::KeyTree;
     /// 
     /// static HOBBITS: &'static str = r"
     /// hobbit:
@@ -351,7 +447,7 @@ impl KeyTree {
     /// }
     /// 
     /// impl<'a> TryInto<Hobbit> for KeyTree {
-    ///     type Error = KeyTreeError;
+    ///     type Error = Box<dyn Error>;
     /// 
     ///     fn try_into(self) -> Result<Hobbit, Self::Error> {
     ///         Ok(
@@ -419,10 +515,10 @@ impl KeyTree {
     pub (crate) fn assert_top_token_is_keyvalue(&self) -> Result<()> {
         match self.top_token() {
             Token::KeyValue {..} => Ok(()),
-            Token::Key { key, debug, .. } => {
-                return Err(KeyTreeError::Search(format!(
-                    "Expected keyvalue found key {} at {}.", key, debug.line_num,
-                )))
+            Token::Key { .. } => {
+                return Err(Box::new(TopTokenNotKeyValueError {
+                    top_token: self.top_token().clone()
+                }))
             },
         }
     }
@@ -431,12 +527,12 @@ impl KeyTree {
         if self.top_token().key() == parent_segment {
             Ok(())
         } else {
-            Err(KeyTreeError::Search(
-                format!("First segment mismatch [{}. {} {}].",
-                    self.top_token().debug_info().line_num(),
-                    &self.top_token(),
-                    parent_segment,
-                )
+            Err(Box::new(
+                FirstSegmentMismatchError {
+                    top_token: self.top_token().clone(),
+                    parent_segment: parent_segment.into(),
+                    line_num: self.top_token().debug_info().line_num(),
+                }
             ))
         }
     }
@@ -444,7 +540,7 @@ impl KeyTree {
     pub (crate) fn key_into<T>(self) -> Result<T>
     where
         KeyTree: TryInto<T>,
-        KeyTree: TryInto<T, Error = KeyTreeError>,
+        KeyTree: TryInto<T, Error = Box<dyn Error>>,
     {
         // Use the client implementation `TryInto<T> for KeyTree`.
         self.try_into()
@@ -458,35 +554,40 @@ impl KeyTree {
         let token = self.top_token();
 
         T::from_str(token.value())
-            .map_err(|_| KeyTreeError::Search(format!("Failed to parse {} at {}.", token, token.debug_info().line_num())))
+            .map_err(|_| Box::new(
+                KeyValueToStringError {
+                    token: token.clone(),
+                    line_num: token.debug_info().line_num(),
+                }
+            ).into())
     }
 
     /// Parses a `KeyTree` token into an optional value. 
-    pub fn opt_at<T>(&self, key_path: &str) -> Result<Option<T>>
+    pub fn opt_at<T>(&self, kp: &str) -> Result<Option<T>>
     where
         KeyTree: TryInto<T>,
-        KeyTree: TryInto<T, Error = KeyTreeError>,
+        KeyTree: TryInto<T, Error = Box<dyn Error>>,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
         match kts.len() {
             0 => Ok(None),
             1 => Ok(Some(kts[0].clone().key_into()?)),
-            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(Box::new(key_search_error("unique", "multi", key_path))),
         }
     }
 
     /// Parses a `KeyTree` token into a value.
-    pub fn at<T>(&self, key_path: &str) -> Result<T>
+    pub fn at<T>(&self, kp: &str) -> Result<T>
     where
-        Self: TryInto<T, Error = KeyTreeError>,
+        Self: TryInto<T, Error = Box<dyn Error>>,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
         match kts.len() {
-            0 => Err(KeyTreeError::Search(format!("Expected unique keyvalue found none at {}.", key_path))),
+            0 => Err(Box::new(key_search_error("unique keyvalue", "none", key_path))),
             1 => Ok(kts[0].clone().key_into()?),
-            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(Box::new(key_search_error("unique keyvalue", "multi", key_path))),
         }
     }
 
@@ -495,7 +596,6 @@ impl KeyTree {
     // use std::str::FromStr;
     // 
     // use keytree::KeyTree;
-    // use keytree::KeyTreeError;
     //  
     // static TEMP: &'static str = r#"
     // example:
@@ -514,9 +614,9 @@ impl KeyTree {
     // }
     //  
     // impl<'a> TryInto<Temperature> for KeyTree {
-    //     type Error = KeyTreeError;
+    //     type Error = Error;
     //  
-    //     fn try_into(self) -> Result<Temperature, KeyTreeError> {
+    //     fn try_into(self) -> Result<Temperature, Error> {
     //         Ok(Temperature(self.from_str("example::temp")?))
     //     }
     // }
@@ -529,52 +629,61 @@ impl KeyTree {
     // }
     // ```
 
-    pub fn from_str<T>(&self, key_path: &str) -> Result<T>
+    pub fn from_str<T>(&self, kp: &str) -> Result<T>
     where 
         T: FromStr,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
         match kts.len() {
-            0 => Err(KeyTreeError::Search(format!("Expected unique keyvalue found none at {}.", key_path))),
+            0 => Err(Box::new(key_search_error("unique keyvalue", "none", key_path))),
             1 => Ok(kts[0].keyvalue_into()?),
-            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(Box::new(key_search_error("unique keyvalue", "multi", key_path))),
         }
     }
 
     /// Returns an `Option<T: FromStr>` where `Option<T>` is the receiver type. Returns `None` if
     /// the path does not exist.
-    pub fn opt_from_str<T>(&self, key_path: &str) -> Result<Option<T>>
+    pub fn opt_from_str<T>(&self, kp: &str) -> Result<Option<T>>
     where 
         T: FromStr,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
         match kts.len() {
             0 => Ok(None),
             1 => Ok(Some(kts[0].keyvalue_into()?)),
-            _ => Err(KeyTreeError::Search(format!("Expected unique keyvalue found multi at {}.", key_path))),
+            _ => Err(Box::new(
+                KeySearchError {
+                    expected: "unique keyvalue".into(),
+                    found: "multi".into(),
+                    key_path,
+                }
+            )),
         }
     }
 
     /// Returns a `Vec<T: FromStr>` where `Vec<T>` is the receiver type. Expects at least one
     /// key-value. Use `opt_vec_value` if an empty `Vec` is permissible.
-    pub fn vec_from_str<T>(&self, key_path: &str) -> Result<Vec<T>>
+    pub fn vec_from_str<T>(&self, kp: &str) -> Result<Vec<T>>
     where
         T: FromStr,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
 
         let mut v = Vec::new();
         for kt in kts {
             v.push(kt.keyvalue_into()?)
         }
         if v.is_empty() {
-            return Err(KeyTreeError::Search(format!(
-                "Expected non-empty collection at [{}].",
-                key_path,
-            )))
+            return Err(Box::new(
+                KeySearchError {
+                    expected: "collection".into(),
+                    found: "empty".into(),
+                    key_path,
+                }
+            ))
         };
         Ok(v)
     }
@@ -596,21 +705,20 @@ impl KeyTree {
 
     /// Returns a `Vec<T>` where `T` can be coerced from a KeyTree. Fails if the path does not
     /// exist.
-    pub fn vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
+    pub fn vec_at<T>(&self, kp: &str) -> Result<Vec<T>>
     where
         KeyTree: TryInto<T>,
-        KeyTree: TryInto<T, Error = KeyTreeError>,
+        KeyTree: TryInto<T, Error = Box<dyn Error>>,
     {
-        let path = KeyPath::from_str(key_path);
-        let kts = self.resolve_path(&path)?;
+        let key_path = KeyPath::from_str(kp);
+        let kts = self.resolve_path(&key_path)?;
         
         let mut v = Vec::new();
         for kt in kts {
             v.push(kt.key_into()?)
         }
-        if v.is_empty() {
-            return Err(
-                KeyTreeError::Search(format!("Expected non-empty collection at {}.", key_path))
+        if v.is_empty() { return Err(
+                Box::new(key_search_error("collection", "empty", key_path))
             )
         };
         Ok(v)
@@ -621,7 +729,7 @@ impl KeyTree {
     pub fn opt_vec_at<T>(&self, key_path: &str) -> Result<Vec<T>>
     where
         Self: TryInto<T>,
-        Self: TryInto<T, Error = KeyTreeError>,
+        Self: TryInto<T, Error = Box<dyn Error>>,
     {
         let path = KeyPath::from_str(key_path);
         let kts = self.resolve_path(&path)?;
@@ -700,15 +808,13 @@ impl KeyTree {
 
             // Before the last segment of keyvalue. If such as unresolved keypath is a keyvalue
             // then return an error.
-            (Token::KeyValue { key, value, debug, .. }, false) => {
-
-                return Err(KeyTreeError::Search(
-                    format!("Line {} keypath {}. Keypath_extends_beyond_keyvalue {}: {}.",
-                        debug.line_num(),
-                        &key_path,
-                        key,
-                        value,
-                    )
+            (tok @ Token::KeyValue { debug, .. }, false) => {
+                return Err(Box::new(
+                    KeyPathTooLongError { 
+                        key_path: key_path.clone(),
+                        token: tok.clone(),
+                        line_num: debug.line_num(),
+                    }
                 ))
             },
 
@@ -848,16 +954,15 @@ mod test {
     #[test]
     fn should_parse_and_coerce() {
 
-        use std::str::FromStr;
-
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct Hobbit {
              name: String,
              age:  u32,
         }
 
         impl TryInto<Hobbit> for KeyTree {
-            type Error = KeyTreeError;
+            type Error = Box<dyn Error>;
 
             fn try_into(self) -> Result<Hobbit> {
                 Ok(
@@ -879,7 +984,7 @@ mod test {
         assert_eq!(kt.data.0[2].value(), "60");
 
         let kt: KeyTree = KeyTree::parse_str(&s).unwrap();
-        let hobbit: Hobbit = kt.try_into().unwrap();
+        let _: Hobbit = kt.try_into().unwrap();
 
     }
 
@@ -892,7 +997,7 @@ mod test {
             Err(e) => {
                 assert_eq!(
                     e.to_string(),
-                    "File 'missing' not found",
+                    "FileNotFound(missing)",
                 )
             },
         }
@@ -925,4 +1030,3 @@ mod test {
     //     let hobbit: Hobbit = kt.try_into().unwrap();
     // }
 }
-

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
-use crate::{DebugInfo, KeyTreeData, KeyTreeError, Result, Token, TokenDebugInfo};
+use crate::*;
+// use crate::{DebugInfo, KeyTreeData, Result, Token, TokenDebugInfo};
 use std::{fs, path::{Path, PathBuf}};
 use std::{cmp::Ordering};
 
@@ -73,11 +74,7 @@ impl Builder {
     pub(crate) fn append_first_token(&mut self, indent: usize, token: Token) -> Result<usize> {
         match token {
             token @ Token::KeyValue {..} => {
-                return Err(KeyTreeError::Parse(
-                    "Expected key found".to_string(),
-                    token.to_string(),
-                    1,
-                ))
+                return Err(Box::new(ExpectedKey { token: token, line_num: 1 }))
             },
             token @ Token::Key {..} => {
                 let ix = 0;
@@ -279,12 +276,7 @@ impl Parser {
 
     pub fn parse<P: AsRef<Path>>(path: P) -> Result<(KeyTreeData, DebugInfo)> {
         let path: PathBuf = path.as_ref().to_path_buf();
-
-        let path_string = path.to_str()
-            .ok_or(KeyTreeError::IO(String::new()))?.to_string();
-
-        let s = fs::read_to_string(&path).map_err(|_| KeyTreeError::IO(path_string))?;
-
+        let s = fs::read_to_string(&path).map_err(|_| FileNotFound { path: path.clone() })?;
         Self::parse_inner(&s, Some(&path))
     }
 
@@ -293,7 +285,7 @@ impl Parser {
     pub fn parse_inner(s: &str, path_opt: Option<&Path>) -> Result<(KeyTreeData, DebugInfo)> {
         let debug_info = DebugInfo::new(path_opt);
 
-        if s.is_empty() { return Err(KeyTreeError::ParseEmpty) };
+        if s.is_empty() { return Err(Box::new(EmptyStringError)) };
         let lines = s.lines();
 
         // These variables are used by the parser to build tokens.
@@ -404,41 +396,54 @@ impl Parser {
                     // Whitespace errors
 
                     (PS::Ik, Punct::Whitespace) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("No colon after key", token_str, line_num)
+                        return Err(Box::new(NoColonAfterKeyError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num
+                        }))
                     },
+
                     (PS::Cok, Punct::Whitespace) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("Incomplete comment or key", token_str, line_num)
+                        return Err(Box::new(IncompleteCommentOrKeyError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num,
+                        }))
                     },
 
                     // Char errors
 
                     (PS::Rak, Punct::Char) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("No space after key", token_str, line_num)
+                        return Err(Box::new(NoSpaceAfterKeyError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num,
+                        }))
                     },
 
                     // Colon, errors
 
                     (PS::Fc, Punct::Colon) => {
                         let token_str = &s[start_key..=pos - 1];
-                        return parse_err("Colon before key", token_str, line_num)
+                        return Err(Box::new(ColonError { token: token_str.into(), line_num }))
                     },
                     (PS::Bk, Punct::Colon) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("Colon before key", token_str, line_num)
+                        return Err(Box::new(ColonError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num,
+                        }))
                     },
                     (PS::Rak, Punct::Colon) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("No space after key", token_str, line_num)
+                        return Err(Box::new(NoSpaceAfterKeyError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num,
+                        }))
                     },
 
                     // Forward slash errors
 
                     (PS::Rak, Punct::ForwardSlash) => {
-                        let token_str = &s[start_key..=pos - 1];
-                        return parse_err("No space after key", token_str, line_num)
+                        return Err(Box::new(NoSpaceAfterKeyError {
+                            token: s[start_key..=pos - 1].into(),
+                            line_num
+                        }))
                     },
                 };  // end match
 
@@ -459,10 +464,9 @@ impl Parser {
                         next:       None,
                         debug:      TokenDebugInfo {line_num},
                     };
-                    let indent = indent(
-                        &mut root_indent,
-                        start_key
-                    ).map_err(|err| err.into_bad_indent(line_num))?;
+                    let indent = indent(&mut root_indent, start_key)
+                        .map_err(|err| err.into_bad_indent(line_num))?;
+
                     builder.append(indent, token)?;
                 },
                 PS::Ak => {
@@ -472,10 +476,9 @@ impl Parser {
                         next:       None,
                         debug:      TokenDebugInfo {line_num},
                     };
-                    let indent = indent(    
-                        &mut root_indent,
-                        start_key
-                    ).map_err(|err| err.into_bad_indent(line_num))?;
+                    let indent = indent(&mut root_indent, start_key)
+                        .map_err(|err| err.into_bad_indent(line_num))?;
+
                     builder.append(indent, token)?;
                 },
                 PS::Iv => {
@@ -485,10 +488,8 @@ impl Parser {
                         next:   None,
                         debug:  TokenDebugInfo {line_num},
                     };
-                    let indent = indent(
-                        &mut root_indent,
-                        start_key
-                    ).map_err(|err| err.into_bad_indent(line_num))?;
+                    let indent = indent(&mut root_indent, start_key)
+                        .map_err(|err| err.into_bad_indent(line_num))?;
 
                     builder.append(indent, token)?;
                 },
@@ -496,16 +497,22 @@ impl Parser {
                 // Newline errors
 
                 PS::Cok => {
-                    return parse_err("Incomplete line", "/", line_num)
+                    return Err(Box::new(
+                        IncompleteLineError { token: "/".into(), line_num }
+                    ))
                 },
                 PS::Ik => {
-                    let token_str = &line[start_key..=last_pos - 1];
-                    return parse_err("Incomplete line", token_str, line_num)
+                    return Err(Box::new(
+                        IncompleteLineError {
+                            token:  line[start_key..=last_pos - 1].into(),
+                            line_num,
+                        }
+                    ))
                 },
             };
         };
         match builder.data.is_empty() {
-            true => Err(KeyTreeError::ParseNoTokens),
+            true => Err(Box::new(NoTokensError)),
             false => Ok((builder.owned_keytree(), debug_info)),
         }
     }
@@ -513,8 +520,10 @@ impl Parser {
 
 // Returns indent as 0, 1, 2 from token data.
 // If the root indent is not set, return 0.
-fn indent(root_indent: &mut Option<usize>, start_key: usize) -> Result<usize> {
-
+fn indent(
+    root_indent: &mut Option<usize>,
+    start_key: usize) -> std::result::Result<usize, BadIndentTempError>
+{
     match root_indent {
         // root_indent has not been set.
         None => {
@@ -525,16 +534,12 @@ fn indent(root_indent: &mut Option<usize>, start_key: usize) -> Result<usize> {
             let chars_indent = start_key - *root_indent;
 
             if chars_indent % INDENT_STEP != 0 {
-                Err(KeyTreeError::BadIndentTemp(chars_indent))
+                Err(BadIndentTempError { indent: chars_indent })
             } else {
                 Ok(chars_indent / INDENT_STEP)
             }
         }
     }
-}
-
-fn parse_err<T>(msg: &str, token: &str, line: usize) -> Result<T> {
-    Err(KeyTreeError::Parse(msg.to_string(), token.to_string(), line))
 }
 
 #[cfg(test)]
@@ -543,8 +548,6 @@ pub mod test {
     use super::*;
     use indoc::indoc;
     use crate::KeyTree;
-    use crate::{KeyTreeData, TokenDebugInfo};
-    use crate::KeyTreeError::BadIndent;
     
     // === indent =================================================================================
     // Complete
@@ -552,8 +555,7 @@ pub mod test {
     #[test]
     fn indent_should_fail_if_key_misaligned() {
         if let Err(e) = indent(&mut Some(0), 3) {
-            assert_eq!(e, KeyTreeError::BadIndentTemp(3));
-            assert_eq!(e.to_string(), "Bad indent of 3");
+            assert_eq!(e.to_string(), "BadIndentError(3)");
         } else { assert!(false) }
     }
 
@@ -592,7 +594,7 @@ pub mod test {
             key:
                key:");
         if let Err(e) = Parser::parse_str(&s) {
-           assert_eq!(e, BadIndent(3,2));
+           assert_eq!(e.to_string(), "BadIndentError(3, 2)");
         } else { assert!(false) };
     }
 
@@ -659,7 +661,7 @@ pub mod test {
     #[test]
     fn append_first_token_should_fail_on_keyvalue() {
         if let Err(err) = new_builder().append_first_token(0, keyval_token()) {
-            assert_eq!(err.to_string(), "Expected key found [key: value] on line 1")
+            assert_eq!(err.to_string(), "ExpectedKey(key: value, 1)")
         } else { assert!(false) }
     }
 

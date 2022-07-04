@@ -1,5 +1,8 @@
-use std::convert::TryInto;
-use key_tree::{KeyTree, KeyTreeError};
+use std::{
+    convert::TryInto,
+    error::Error,
+};
+use key_tree::KeyTree;
 
 static HOBBITS: &'static str = r"hobbit:
     name:         Frodo Baggins
@@ -14,6 +17,7 @@ static HOBBITS: &'static str = r"hobbit:
             nick: Sam";
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Hobbit {
     name: String,
     age: u32,
@@ -22,7 +26,7 @@ struct Hobbit {
 }
 
 impl<'a> TryInto<Hobbit> for KeyTree {
-    type Error = KeyTreeError;
+    type Error = Box<dyn Error>;
 
     fn try_into(self) -> Result<Hobbit, Self::Error> {
         Ok(
@@ -38,7 +42,7 @@ impl<'a> TryInto<Hobbit> for KeyTree {
 
 #[test]
 fn try_into_should_work() {
-    let hobbit: Hobbit = KeyTree::parse_str(HOBBITS)
+    let _: Hobbit = KeyTree::parse_str(HOBBITS)
         .unwrap()
         .try_into()
         .unwrap();
