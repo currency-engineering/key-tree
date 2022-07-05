@@ -47,7 +47,9 @@ impl KeyValToken {
         s.push_str(&padding(self.indent * 4));
         s.push_str(&self.key);
         s.push_str(": ");
-        s.push_str(&padding(val_indent - (self.key.len() + 2 + self.indent * 4)));
+        s.push_str(&padding(
+            val_indent - (self.key.len() + 2 + self.indent * 4),
+        ));
         s.push_str(&self.val);
         s
     }
@@ -85,39 +87,33 @@ impl KeyTreeString {
 
     /// Push a key token onto the String. The indent value is relative to the root indent.
     pub fn push_key(&mut self, indent: usize, key: &str) {
-        let key = Token::KeyToken(
-            KeyToken {
-                indent,
-                key: String::from(key),
-            }
-        );
+        let key = Token::KeyToken(KeyToken {
+            indent,
+            key: String::from(key),
+        });
         self.tokens.push(key)
     }
 
     pub fn push_opt_value<T: Display>(&mut self, indent: usize, key: &str, value: Option<T>) {
         match value {
-            None => {},
-            Some(v) => {
-                self.push_keyvalue(indent, key, v.to_string().as_str())
-            },
+            None => {}
+            Some(v) => self.push_keyvalue(indent, key, v.to_string().as_str()),
         }
     }
 
     /// Push a key-value token onto the String. The indent value is relative to the root indent.
     pub fn push_keyvalue<T: Display>(&mut self, indent: usize, key: &str, value: T) {
-        let kv = Token::KeyValToken(
-            KeyValToken {
-                indent,
-                key: String::from(key),
-                val: value.to_string(),
-            }
-        );
+        let kv = Token::KeyValToken(KeyValToken {
+            indent,
+            key: String::from(key),
+            val: value.to_string(),
+        });
         self.tokens.push(kv);
 
         //      |
         //      v
-        // 012345 
-        // key:  
+        // 012345
+        // key:
         let key_len = key.chars().count() + (indent * 4) + 2;
 
         // |   |
@@ -130,12 +126,12 @@ impl KeyTreeString {
             3 => key_len + 1,
             _ => unreachable!(),
         };
-                
+
         //  val_indent (5)
         //      |
         //      v
         // 012345
-        // key:  
+        // key:
         //
         // (padding = val_indent - (key.len() + 2)
 
@@ -146,14 +142,12 @@ impl KeyTreeString {
 
     /// Push a comment onto the String. The indent value is relative to the root indent.
     pub fn push_comment(&mut self, indent: usize, comment: &str) {
-        let comment = Token::Comment(
-            Comment {
-                indent: indent * 4,
-                comment: String::from(comment),
-            }
-        );
+        let comment = Token::Comment(Comment {
+            indent: indent * 4,
+            comment: String::from(comment),
+        });
         self.tokens.push(comment)
-    } 
+    }
 
     /// Push a KeyTreeString on to the String. The indent value is relative to the root indent.
     pub fn push_keytree(&mut self, indent: usize, keytree: KeyTreeString) {
@@ -161,10 +155,10 @@ impl KeyTreeString {
             match token {
                 Token::KeyToken(k) => {
                     self.push_key(k.indent + indent, &k.key);
-                },
+                }
                 Token::KeyValToken(kv) => {
                     self.push_keyvalue(kv.indent + indent, &kv.key, &kv.val);
-                },
+                }
                 Token::Comment(c) => {
                     self.push_comment(c.indent + indent, &c.comment);
                 }
@@ -200,29 +194,19 @@ fn padding(len: usize) -> String {
 fn test_1() {
     let mut kt_string = KeyTreeString::new();
     kt_string.push_keyvalue(1, "key", "value");
-    assert_eq!(
-        kt_string.to_string(),
-        "    key:    value\n",
-    )
+    assert_eq!(kt_string.to_string(), "    key:    value\n",)
 }
 
 #[test]
 fn test_2() {
     let mut kt_string = KeyTreeString::new();
     kt_string.push_keyvalue(0, "key", "value");
-    assert_eq!(
-        kt_string.to_string(),
-        "key:    value\n",
-    )
+    assert_eq!(kt_string.to_string(), "key:    value\n",)
 }
 
 #[test]
 fn test_3() {
     let mut kt_string = KeyTreeString::new();
     kt_string.push_keyvalue(0, "ky", "value");
-    assert_eq!(
-        kt_string.to_string(),
-        "ky: value\n",
-    )
+    assert_eq!(kt_string.to_string(), "ky: value\n",)
 }
-
