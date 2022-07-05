@@ -494,7 +494,7 @@ impl KeyTree {
     ///     nick: Option<String>,
     /// }
     ///
-    /// impl<'a> TryInto<Hobbit> for KeyTree {
+    /// impl TryInto<Hobbit> for KeyTree {
     ///     type Error = Box<dyn Error>;
     ///
     ///     fn try_into(self) -> Result<Hobbit, Self::Error> {
